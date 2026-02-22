@@ -1,0 +1,8 @@
+{
+    "sample_rate": 22050,
+    "mono": true,
+    "duration": 30,
+    "normalization": true,
+    "n_mfcc": 12,
+    "data_path": "data/genres_original"
+}
