@@ -1,4 +1,4 @@
-Model,CV_Score,Val_Score,Val_Precision,Val_Recall,Val_F1,Test_Score,Test_Precision,Test_Recall,Test_F1,Best_Params
-SVM,0.7378,0.9864,0.9874,0.9867,0.9864,0.7613,0.7719,0.76,0.7613,"{'classifier__C': 10, 'classifier__decision_function_shape': 'ovr', 'classifier__gamma': 0.01, 'classifier__kernel': 'rbf'}"
-Random Forest,0.7076,1.0,1.0,1.0,1.0,0.7362,0.7536,0.74,0.7362,"{'classifier__max_depth': 15, 'classifier__max_features': 'sqrt', 'classifier__min_samples_leaf': 2, 'classifier__min_samples_split': 2, 'classifier__n_estimators': 150}"
-XGBoost,0.6397,1.0,1.0,1.0,1.0,0.6609,0.6904,0.6533,0.6609,"{'classifier__learning_rate': 0.1, 'classifier__max_depth': 10, 'classifier__objective': 'multi:softmax'}"
+Model,Tuning_CV_F1,Test_F1_Macro,Test_Accuracy,Test_F1_Weighted,Test_Precision_Macro,Test_Recall_Macro,Test_Inference_ms
+SVM,0.7062,0.652,0.6533,0.652,0.6832,0.6533,0.0558
+Random Forest,0.6247,0.65,0.6533,0.65,0.6581,0.6533,0.1347
+XGBoost,0.589,0.6645,0.6667,0.6645,0.6773,0.6667,0.0434
