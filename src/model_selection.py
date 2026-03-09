@@ -75,7 +75,6 @@ def build_model_registry(model_grids: dict) -> list[tuple[str, object, dict, boo
             "XGBoost",
             XGBClassifier(
                 random_state=RANDOM_STATE,
-                use_label_encoder=False,
                 eval_metric="mlogloss",
             ),
             model_grids["XGBoost"],
@@ -246,10 +245,10 @@ def main() -> None:
 
     data_path = project_root / "processed_data/features.parquet"
     grids_path = project_root / "configs/model_grids.json"
-    encoder_path = project_root / "configs/genre_encoder.pkl"
-    results_path = project_root / "results/model_results.csv"
-    confusion_matrices_dir = project_root / "results/model_selection/confusion_matrices"
-    models_output_dir = project_root / "results/model_selection"
+    encoder_path = project_root / "model/genre_encoder.pkl"
+    results_path = project_root / "model/model_selection/model_results.csv"
+    confusion_matrices_dir = project_root / "model/model_selection/confusion_matrices"
+    models_output_dir = project_root / "model/model_selection"
 
     model_grids = load_model_grids(grids_path)
     genre_encoder = load_genre_encoder(encoder_path)
@@ -269,7 +268,19 @@ def main() -> None:
         confusion_matrices_dir,
         models_output_dir,
     )
+    # Save X train, y train, X val, y val, X test, y test in parquet format
+    split_output_dir = project_root / "processed_data/train_val_test"
+    split_output_dir.mkdir(parents=True, exist_ok=True)
+
+    X_train.to_parquet(split_output_dir / "X_train.parquet")
+    y_train.to_frame(name=TARGET_COLUMN).to_parquet(split_output_dir / "y_train.parquet")
+    X_val.to_parquet(split_output_dir / "X_val.parquet")
+    y_val.to_frame(name=TARGET_COLUMN).to_parquet(split_output_dir / "y_val.parquet")
+    X_test.to_parquet(split_output_dir / "X_test.parquet")
+    y_test.to_frame(name=TARGET_COLUMN).to_parquet(split_output_dir / "y_test.parquet")
+
     save_results(results_df, results_path)
+
 
 
 if __name__ == "__main__":
