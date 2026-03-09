@@ -1,4 +1,0 @@
-Model,Tuning_CV_F1,Test_F1_Macro,Test_Accuracy,Test_F1_Weighted,Test_Precision_Macro,Test_Recall_Macro,Test_Inference_ms
-SVM,0.7062,0.652,0.6533,0.652,0.6832,0.6533,0.0558
-Random Forest,0.6247,0.65,0.6533,0.65,0.6581,0.6533,0.1347
-XGBoost,0.589,0.6645,0.6667,0.6645,0.6773,0.6667,0.0434
