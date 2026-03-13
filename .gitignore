@@ -31,3 +31,21 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Variables de entorno
+.env
+.env.*
+
+# Cache y reportes de pruebas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Archivos temporales de la API
+temp_audio_file
+temp_audio_file*
