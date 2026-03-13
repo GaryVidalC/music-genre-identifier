@@ -1,6 +1,9 @@
-# Music Genre Identifier API
+# Music Genre Identifier API 
+## Versíon del modelo: Metal-v1
 
 API en FastAPI para predecir el genero musical de un archivo `.wav` usando un modelo entrenado.
+
+**IMPORTANTE**: Probablemte solo funciona con .wav y si dura más de 30 segundos deberia crashear. Tamo trabajando pa uste
 
 ## Endpoints
 
