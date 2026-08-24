@@ -1,6 +1,7 @@
 import fastapi
 import json
-from pathlib import Path
+from fastapi import HTTPException
+# from pathlib import Path
 from contextlib import asynccontextmanager
 from app.model_loader import load_metadata, load_encoder, load_model
 from app.audio_processing import feature_extraction
@@ -24,14 +25,6 @@ async def lifespan(app: fastapi.FastAPI):
 
 # Create app
 app = fastapi.FastAPI(lifespan=lifespan)
-
-# Root directory of the project
-# APP_DIR = Path(__file__).parent
-# ROOT_DIR = APP_DIR.parent
-
-# @app.get("/")
-# def read_root(): 
-#     return {"Hello": "World"}
 
 @app.get("/health")
 def read_health():
@@ -61,34 +54,32 @@ def read_ready(request: fastapi.Request):
 
 @app.post("/predict-audio")
 def predict_audio(request: fastapi.Request, file: fastapi.UploadFile = fastapi.File(...)):
+
     # verify that file is nonempty
     if file.filename == "":
-        return {"error": "No file uploaded."}
+        raise HTTPException(status_code=400, detail="No file uploaded. Please upload a .wav file.")
     
     # verify that file is .wav
     if not file.filename.endswith(".wav"):
-        return {"error": "Invalid file format. Please upload a .wav file."}
-    
-
-    # Save the uploaded file to a temporary location
-    temp_file_path = Path("temp_audio_file")
-    
-    with open(temp_file_path, "wb") as f:
-        f.write(file.file.read())
+        raise HTTPException(status_code=415, detail="Invalid file format. Please upload a .wav file.")
 
     # Extract features from the audio file
-    features = feature_extraction(temp_file_path, request.app.state.metadata)
-
+    try:
+        file.file.seek(0)  # Ensure the file pointer is at the beginning    
+        features = feature_extraction(file.file, request.app.state.metadata)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error extracting features from audio file.")
+    
     # Predict genre using the model and encoder
-    predicted_genre = predict_genre(features, request.app.state.model, request.app.state.encoder)
-
-    # Remove the temporary file
-    temp_file_path.unlink()
+    try:
+        predicted_genre = predict_genre(features, request.app.state.model, request.app.state.encoder)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error predicting genre from features.")
 
     result = {"predicted_genre": predicted_genre,
-              "model_name": request.app.state.metadata["model"]["model_name"],
-              "model_used": request.app.state.metadata["model"]["model_used"],
-              "model_version": request.app.state.metadata["model"]["version"],
-              }
+            "model_name": request.app.state.metadata["model"]["model_name"],
+            "model_used": request.app.state.metadata["model"]["model_used"],
+            "model_version": request.app.state.metadata["model"]["version"],
+            }
 
     return result

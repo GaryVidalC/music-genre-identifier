@@ -59,7 +59,7 @@ model_metadata = {
     "model_used": model_used,
     "version": "1.0",
     "training_date": datetime.date.today().isoformat(),
-    'model_pkl_path': str(target_model_path),
+    'model_pkl_path': f"model/{model_used_lower}_model.pkl",
 }
 
 # model stats

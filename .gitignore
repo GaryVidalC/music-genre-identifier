@@ -49,3 +49,6 @@ htmlcov/
 # Archivos temporales de la API
 temp_audio_file
 temp_audio_file*
+
+# files
+plan.md
