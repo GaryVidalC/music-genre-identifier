@@ -85,7 +85,7 @@
         "model_used": "XGBoost",
         "version": "1.0",
         "training_date": "2026-03-08",
-        "model_pkl_path": "/home/gary/Desktop/proyectos/music-genre-identifier/model/xgboost_model.pkl"
+        "model_pkl_path": "model/xgboost_model.pkl"
     },
     "model_stats": {
         "Model": "XGBoost",

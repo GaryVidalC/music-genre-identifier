@@ -1,31 +1,49 @@
-# Music Genre Identifier API 
-## Versíon del modelo: Metal-v1
+# Problem
 
-API en FastAPI para predecir el genero musical de un archivo `.wav` usando un modelo entrenado.
+Trying to implement a music identifier with fast-api, then adding a recomendation system. I only have the first block "working". Need to improve and generalize it a bit first.
 
-**IMPORTANTE**: Probablemte solo funciona con .wav y si dura más de 30 segundos deberia crashear. Tamo trabajando pa uste
+## Dataset and Model
+
+Used the [GZTAN dataset](https://www.kaggle.com/datasets/andradaolteanu/gtzan-dataset-music-genre-classification) for training. 
+
+- Librosa: for processing the audiofiles.
+- XGBoost: for prediction (had an F1-score of 0.66 aprox).
+
+I evaluated SVM and RandomForest, but the best performing model at the moment was XGBoost.
+
+# First block: Music Genre Identifier API 
+## Model "Metal-v1"
+
+API in FastAPI to detect the genre of a .wav file.
+
+**IMPORTANT**: It only works with .wav files that are 30 seconds long.
 
 ## Endpoints
 
-- `GET /health`: verifica que la API esta viva.
-- `GET /ready`: verifica que modelo, encoder y metadata fueron cargados.
-- `GET /model-info`: devuelve la metadata del modelo activo.
-- `POST /predict-audio`: recibe un `.wav` y devuelve el genero predicho.
+- `GET /health`: Verifies the status of the API
+- `GET /ready`: Verifies that data and model were loaded.
+- `GET /model-info`: Gets the metadata of the current model.
+- `POST /predict-audio`: inputs a .wav and outputs a genre.
 
-## Ejecutar
+## To start:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Documentacion interactiva:
+Full Documentation:
 
 - `http://127.0.0.1:8000/docs`
 
-## Estructura
+## Structure
 
-- `app/main.py`: endpoints y ciclo de vida (`lifespan`).
-- `app/model_loader.py`: carga metadata, encoder y modelo.
-- `app/audio_processing.py`: extraccion de features de audio.
-- `app/inference.py`: prediccion de genero.
-- `model/`: artefactos del modelo (`.pkl`, `metadata.json`).
+- `app/main.py`: endpoint and `lifespan`.
+- `app/model_loader.py`: loads metadata, encoder and model.
+- `app/audio_processing.py`: extracts audio features.
+- `app/inference.py`: predicts genre.
+- `model/`: model's (`.pkl`, `metadata.json`).
+
+# To do:
+
+- Add other audio filetypes (.mp3, .FLAC, etc)
+- Implement inference model for files with >30 seconds
