@@ -156,7 +156,7 @@ def train_and_score_models(
     models_output_dir: Path,
 ) -> pd.DataFrame:
     """Run grid search on training set only, evaluate on validation and test sets.
-    
+
     Process:
     1. GridSearchCV finds best hyperparams using 5-fold CV within train set (Tuning_CV).
     2. Evaluate best model on validation set (clean, Val_Score).

@@ -1,6 +1,3 @@
-import numpy as np
-import pickle
-
 def predict_genre(features, model, encoder):
 
     # Predict genre using the model

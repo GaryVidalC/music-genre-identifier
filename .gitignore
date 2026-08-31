@@ -34,7 +34,6 @@ Thumbs.db
 
 # Variables de entorno
 .env
-.env.*
 
 # Cache y reportes de pruebas
 .pytest_cache/
@@ -45,10 +44,6 @@ htmlcov/
 
 # Notebooks
 .ipynb_checkpoints/
-
-# Archivos temporales de la API
-temp_audio_file
-temp_audio_file*
 
 # files
 plan.md

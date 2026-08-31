@@ -22,7 +22,7 @@ audio_file_path = Path(args.audio_file)
 
 # Load metadata
 
-with (PROJECT_ROOT / 'model/genre_encoder.pkl').open('rb') as f:  
+with (PROJECT_ROOT / 'model/genre_encoder.pkl').open('rb') as f:
     encoder = pickle.load(f)
 
 metadata = json.load((PROJECT_ROOT / 'model/metadata.json').open('r', encoding='utf-8'))
@@ -34,13 +34,13 @@ with (PROJECT_ROOT / f'model/{model_name}_model.pkl').open('rb') as f:
 
 # Load and preprocess the audio file
 
-signal, sr = librosa.load(audio_file_path, 
-                        sr=metadata['preprocessing']['sample_rate'], 
-                        mono=metadata['preprocessing']['mono'], 
+signal, sr = librosa.load(audio_file_path,
+                        sr=metadata['preprocessing']['sample_rate'],
+                        mono=metadata['preprocessing']['mono'],
                         duration=metadata['preprocessing']['duration'])
 
-signal = standardize_signal(signal, 
-                            metadata['preprocessing']['sample_rate'], 
+signal = standardize_signal(signal,
+                            metadata['preprocessing']['sample_rate'],
                             metadata['preprocessing']['duration'],
                             metadata['preprocessing']['normalization'])
 
