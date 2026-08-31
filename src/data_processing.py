@@ -22,18 +22,18 @@ for genre_path in data_path.iterdir():
         continue
     for audio_file in genre_path.glob('*.wav'):
         try:
-            signal, sr = librosa.load(audio_file, sr=CONFIG['sample_rate'], 
+            signal, sr = librosa.load(audio_file, sr=CONFIG['sample_rate'],
                                       mono=CONFIG['mono'], duration=CONFIG['duration'])
-            signal = standardize_signal(signal, CONFIG['sample_rate'], 
+            signal = standardize_signal(signal, CONFIG['sample_rate'],
                                        CONFIG['duration'], CONFIG['normalization'])
-            
+
             features = extract_audio_features(signal, sr, CONFIG['n_mfcc'])
             features['genre'] = genre_path.name
             data_records.append(features)
         except Exception as e:
             skipped_files.append(str(audio_file))
             continue
-    
+
 df = pd.DataFrame(data_records)
 
 # encode genres
@@ -51,4 +51,3 @@ print(f"saved dataset: {len(df)} samples, {len(df.columns)} features")
 print(f"Skipped files: {len(skipped_files)}")
 
 
-        

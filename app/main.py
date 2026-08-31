@@ -1,11 +1,10 @@
 import fastapi
-import json
 from fastapi import HTTPException
-# from pathlib import Path
 from contextlib import asynccontextmanager
 from app.model_loader import load_metadata, load_encoder, load_model
 from app.audio_processing import feature_extraction
 from app.inference import predict_genre
+import soundfile as sf
 
 # Define lifespan for the app
 @asynccontextmanager
@@ -52,28 +51,62 @@ def read_ready(request: fastapi.Request):
 
     return data_loaded
 
+def validate_wav(file: fastapi.UploadFile):
+
+    MAX_AUDIO_SIZE = 100 * 1024 * 1024  # 100 MB
+    # verify that file is nonempty
+    if not file.size:
+        raise HTTPException(status_code=400, detail="Empty file uploaded. Please upload a valid .wav file.")
+
+    # verify that file is not too large
+    if file.size > MAX_AUDIO_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Please upload a .wav file smaller than 100 MB.")
+
+    try:
+        file.file.seek(0)  # Ensure the file pointer is at the beginning
+        with sf.SoundFile(file.file) as audio_file:
+            audio_format = audio_file.format
+            sample_rate = audio_file.samplerate
+            channels = audio_file.channels
+            frames = audio_file.frames
+    except sf.SoundFileError as error:
+        raise HTTPException(status_code=400, detail="Invalid audio file. Please upload a valid .wav file.") from error
+
+    finally:
+        file.file.seek(0)  # Reset the file pointer to the beginning after reading
+
+    if audio_format != 'WAV':
+        raise HTTPException(status_code=400, detail="Invalid audio format. Please upload a .wav file.")
+
+    if sample_rate <= 0 or frames <= 0 or channels <= 0:
+        raise HTTPException(status_code=400, detail="Invalid audio file. Please upload a valid .wav file.")
+
+    duration = frames / sample_rate
+
+    if not 29 <= duration <= 31:
+        raise HTTPException(status_code=400, detail="Invalid audio duration. Please upload a .wav with aprox 30 seconds.")
+
+    return {"duration": duration, "sample_rate": sample_rate, "channels": channels, "frames": frames}
+
+
+
 @app.post("/predict-audio")
 def predict_audio(request: fastapi.Request, file: fastapi.UploadFile = fastapi.File(...)):
+    # verify that file is valid
 
-    # verify that file is nonempty
-    if file.filename == "":
-        raise HTTPException(status_code=400, detail="No file uploaded. Please upload a .wav file.")
-    
-    # verify that file is .wav
-    if not file.filename.endswith(".wav"):
-        raise HTTPException(status_code=415, detail="Invalid file format. Please upload a .wav file.")
+    validate_wav(file)
 
     # Extract features from the audio file
     try:
-        file.file.seek(0)  # Ensure the file pointer is at the beginning    
+        file.file.seek(0)  # Ensure the file pointer is at the beginning
         features = feature_extraction(file.file, request.app.state.metadata)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Error extracting features from audio file.")
-    
+
     # Predict genre using the model and encoder
     try:
         predicted_genre = predict_genre(features, request.app.state.model, request.app.state.encoder)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Error predicting genre from features.")
 
     result = {"predicted_genre": predicted_genre,
