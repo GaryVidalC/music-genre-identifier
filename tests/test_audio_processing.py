@@ -101,19 +101,8 @@ def test_audio_features_values():
     n_mfcc = 12
     features = extract_audio_features(signal,sr=sr, n_mfcc=n_mfcc)
 
-    assert isinstance(features['mean_spectral_centroid'], float) and features['mean_spectral_centroid'] < np.inf
-    assert isinstance(features['std_spectral_centroid'], float) and features['std_spectral_centroid'] < np.inf
-    assert isinstance(features['mean_spectral_bandwidth'], float) and features['mean_spectral_bandwidth'] < np.inf
-    assert isinstance(features['std_spectral_bandwidth'], float) and features['std_spectral_bandwidth'] < np.inf
-    assert isinstance(features['mean_spectral_rolloff'], float) and features['mean_spectral_rolloff'] < np.inf
-    assert isinstance(features['std_spectral_rolloff'], float) and features['std_spectral_rolloff'] < np.inf
-
-    for i in range(n_mfcc):
-        assert isinstance(features[f'mean_mfcc_{i}'], float) and features[f'mean_mfcc_{i}'] < np.inf
-        assert isinstance(features[f'std_mfcc_{i}'], float) and features[f'std_mfcc_{i}'] < np.inf
-    for i in range(12):  # vhroma always have 12 features, regardless of n_mfcc
-        assert isinstance(features[f'mean_chroma_{i}'], float) and features[f'mean_chroma_{i}'] < np.inf 
-        assert isinstance(features[f'std_chroma_{i}'], float) and features[f'std_chroma_{i}'] < np.inf
+    assert all(np.isscalar(value) for value in features.values())
+    assert np.all(np.isfinite(list(features.values())))
 
 def test_audio_features_with_silent_signal():
     sr = 22050
@@ -151,9 +140,9 @@ def test_audio_features_with_other_n_mfcc_values():
         for i in range(n_mfcc):
             assert f'mean_mfcc_{i}' in features
             assert f"std_mfcc_{i}" in features
-            if i < 12:  # Only check chroma features for the first 12 MFCCs
-                assert f"mean_chroma_{i}" in features
-                assert f"std_chroma_{i}" in features
+        for i in range(12):
+            assert f"mean_chroma_{i}" in features
+            assert f"std_chroma_{i}" in features
         
         assert 'mean_spectral_centroid' in features
         assert 'std_spectral_centroid' in features
@@ -206,7 +195,7 @@ def test_feature_extraction():
     assert results.shape == (1, 54)  # 1 sample, 54 features
     assert np.all(np.isfinite(results))  # Ensure all features are finite
 
-def test_resampling_and_mono_conversion():
+def test_resampling_and_mono_conversion(monkeypatch):
     # Create a stereo signal with a different sample rate
     sr_original = 44100
     duration = 1
@@ -242,13 +231,27 @@ def test_resampling_and_mono_conversion():
             ]
         }
     }   
+    received_audio = {}
+
+    def capture_audio(signal, sr, n_mfcc):
+        received_audio["signal"] = signal
+        received_audio["sample_rate"] = sr
+        received_audio["n_mfcc"] = n_mfcc
+        return {feature: 0.0 for feature in metadata["preprocessing"]["features"]}
+
+    monkeypatch.setattr("app.audio_processing.extract_audio_features", capture_audio)
+
     results = feature_extraction(wav, metadata)
 
     assert isinstance(results, np.ndarray)
     assert results.shape == (1, 54)  # 1 sample, 54 features
     assert np.all(np.isfinite(results))  # Ensure all features are finite
+    assert received_audio["sample_rate"] == 22050
+    assert received_audio["signal"].ndim == 1
+    assert len(received_audio["signal"]) == 22050
+    assert received_audio["n_mfcc"] == 12
 
-def test_feature_extraction_feature_order():
+def test_feature_extraction_feature_order(monkeypatch):
     # Create a simple sine wave signal
     sr = 22050
     duration = 1
@@ -266,28 +269,25 @@ def test_feature_extraction_feature_order():
             "duration": duration,
             "normalization": True,
             "n_mfcc": 12,
-            "features": [
-                f"mean_mfcc_{i}" for i in range(12)
-            ] + [
-                f"std_mfcc_{i}" for i in range(12)
-            ] + [
-                f"mean_chroma_{i}" for i in range(12)
-            ] + [
-                f"std_chroma_{i}" for i in range(12)
-            ] + [
-                'mean_spectral_centroid',
-                'std_spectral_centroid',
-                'mean_spectral_bandwidth',
-                'std_spectral_bandwidth',
-                'mean_spectral_rolloff',
-                'std_spectral_rolloff'
-            ]
+            "features": ["feature_c", "feature_a", "feature_b"]
         }
-    }   
+    }
+
+    extracted_features = {
+        "feature_a": 10.0,
+        "feature_b": 20.0,
+        "feature_c": 30.0,
+    }
+
+    def return_known_features(signal, sr, n_mfcc):
+        return extracted_features
+
+    monkeypatch.setattr(
+        "app.audio_processing.extract_audio_features",
+        return_known_features,
+    )
+
     results = feature_extraction(wav, metadata)
 
-    # Check that the order of features matches the order specified in metadata
-    expected_order = metadata['preprocessing']['features']
-    actual_order = list(metadata['preprocessing']['features'])
-    
-    assert expected_order == actual_order, "Feature order does not match the specified order in metadata."
+    assert results.shape == (1, 3)
+    assert np.array_equal(results, np.array([[30.0, 10.0, 20.0]]))
