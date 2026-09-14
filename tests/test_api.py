@@ -1,10 +1,11 @@
 import pytest
-from app import main
-from fastapi.testclient import TestClient
 import io
 import numpy as np
 import soundfile as sf
 
+from app import main
+from fastapi.testclient import TestClient
+from fastapi import UploadFile, HTTPException
 
 
 TEST_METADATA = {
@@ -162,3 +163,57 @@ def test_predict_longer_audio(client):
     response_long = client.post("/predict-audio", files=files_long)
     assert response_long.status_code == 400 
 
+def test_predict_audio_no_file(client):
+    response = client.post("/predict-audio", files={})
+    assert response.status_code == 422  # Unprocessable Entity due to missing file
+
+def test_predict_audio_large_file(client):
+    upload = UploadFile(
+        file = io.BytesIO(b""),
+        filename = "large.wav",
+        size = 100 * 1024 * 1024 + 1, 
+    )
+    with pytest.raises(HTTPException) as error:
+        main.validate_wav(upload)
+    assert error.value.status_code == 413
+    
+
+def test_predict_audio_extraction_error(client, monkeypatch):
+    # Create a valid .wav file
+    sample_rate = 44100
+    duration = 30  # seconds
+    frequency = 440  # Hz (A4 note)
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    audio_data = 0.5 * np.sin(2 * np.pi * frequency * t)
+
+    wav_file = io.BytesIO()
+    sf.write(wav_file, audio_data, sample_rate, format='WAV')
+    wav_file.seek(0)
+
+    # Patch feature_extraction to raise an exception
+    monkeypatch.setattr(main, "feature_extraction", lambda audio_file, metadata: (_ for _ in ()).throw(Exception("Feature extraction error")))
+
+    files = {"file": ("test.wav", wav_file, "audio/wav")}
+    response = client.post("/predict-audio", files=files)
+
+    assert response.status_code == 500
+
+def test_predict_audio_prediction_error(client, monkeypatch):
+    # Create a valid .wav file
+    sample_rate = 44100
+    duration = 30  # seconds
+    frequency = 440  # Hz (A4 note)
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    audio_data = 0.5 * np.sin(2 * np.pi * frequency * t)
+
+    wav_file = io.BytesIO()
+    sf.write(wav_file, audio_data, sample_rate, format='WAV')
+    wav_file.seek(0)
+
+    # Patch predict_genre to raise an exception
+    monkeypatch.setattr(main, "predict_genre", lambda features, model, encoder: (_ for _ in ()).throw(Exception("Prediction error")))
+
+    files = {"file": ("test.wav", wav_file, "audio/wav")}
+    response = client.post("/predict-audio", files=files)
+
+    assert response.status_code == 500
