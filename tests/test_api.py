@@ -17,7 +17,6 @@ TEST_METADATA = {
 }
 
 @pytest.fixture
-
 def client(monkeypatch):
 
     monkeypatch.setattr(
@@ -167,7 +166,7 @@ def test_predict_audio_no_file(client):
     response = client.post("/predict-audio", files={})
     assert response.status_code == 422  # Unprocessable Entity due to missing file
 
-def test_predict_audio_large_file(client):
+def test_predict_audio_large_file():
     upload = UploadFile(
         file = io.BytesIO(b""),
         filename = "large.wav",
@@ -175,6 +174,7 @@ def test_predict_audio_large_file(client):
     )
     with pytest.raises(HTTPException) as error:
         main.validate_wav(upload)
+
     assert error.value.status_code == 413
     
 
