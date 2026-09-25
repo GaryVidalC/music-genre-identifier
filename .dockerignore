@@ -1,0 +1,13 @@
+.git/
+.pytest_cache/
+.venv/
+__pycache__/
+**/__pycache__/
+**/*.pyc
+
+configs/
+data/
+processed_data/
+src/
+.env
+tests/
