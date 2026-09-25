@@ -4,6 +4,8 @@ This project classifies 30-second WAV clips into one of ten music genres. It cov
 
 The supported genres are blues, classical, country, disco, hiphop, jazz, metal, pop, reggae, and rock.
 
+Use Docker to start the API.
+
 ## Results
 
 Three classifiers were trained and evaluated on the same split. XGBoost produced the best test macro F1 and is the model served by the API.
@@ -48,34 +50,30 @@ The upload must be a valid WAV file between 29 and 31 seconds long and no larger
 | `GET` | `/model-info` | Returns model and preprocessing metadata |
 | `POST` | `/predict-audio` | Accepts a WAV upload and returns the predicted genre |
 
-FastAPI also exposes interactive documentation at `http://127.0.0.1:8000/docs`.
+FastAPI also exposes interactive documentation at `http://localhost:8080/docs`.
 
-## Running the API
+## Running the API with Docker
 
-Create a virtual environment and install the production dependencies:
+The Docker image contains the inference API and model artifacts. Training code and data remain outside the runtime image.
+
+### Building the image
+
+To build the image, run from the root of the repo:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+docker build -t music-ai .
 ```
 
-The audio stack requires `ffmpeg` and `libsndfile` to be available on the system. On Debian or Ubuntu, the included setup script installs them together with the Python dependencies:
+### Running the container
+
+To run it, use the following:
 
 ```bash
-bash setup.sh
+docker run --rm -p 8080:8080 music-ai:latest
 ```
 
-Start the service:
-
 ```bash
-uvicorn app.main:app --reload
-```
-
-Send a prediction request:
-
-```bash
-curl -X POST http://127.0.0.1:8000/predict-audio \
+curl -X POST http://localhost:8080/predict-audio \
   -F "file=@path/to/audio.wav"
 ```
 
@@ -88,6 +86,15 @@ Example response:
   "model_used": "XGBoost",
   "model_version": "1.0"
 }
+```
+
+## Tests
+
+Install the development dependencies and run the test suite:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
 ## Training dependencies
@@ -106,6 +113,9 @@ configs/         Preprocessing and model-search configuration
 model/           Trained model, label encoder, and metadata
 src/             Data processing, training, and metadata scripts
 processed_data/  Extracted features and dataset splits
+tests/           Unit and API tests
+Dockerfile       Container image definition for the inference API
+.dockerignore    Files excluded from the Docker build context
 ```
 
 ## Limitations

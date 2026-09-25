@@ -39,15 +39,18 @@ def read_ready(request: fastapi.Request):
 
     if request.app.state.model is not None:
         data_loaded["model_loaded"] = True
-    else:        data_loaded["model_loaded"] = False
+    else:        
+        data_loaded["model_loaded"] = False
 
     if request.app.state.encoder is not None:
         data_loaded["encoder_loaded"] = True
-    else:        data_loaded["encoder_loaded"] = False
+    else:        
+        data_loaded["encoder_loaded"] = False
 
     if request.app.state.metadata is not None:
         data_loaded["metadata_loaded"] = True
-    else:        data_loaded["metadata_loaded"] = False
+    else:        
+        data_loaded["metadata_loaded"] = False
 
     return data_loaded
 
