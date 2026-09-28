@@ -9,8 +9,12 @@ def test_load_metadata(tmp_path, monkeypatch):
     model_dir = tmp_path / "model"
     model_dir.mkdir()
     metadata = {
-        "model": {"model_used" : "svm" },
-        "preprocessing": {"sample_rate": 16000, "duration": 1.0, "normalize": True},
+        "model": {"model_used": "svm"},
+        "preprocessing": {
+            "sample_rate": 16000,
+            "duration": 1.0,
+            "normalize": True,
+        },
     }
 
     metadata_path = model_dir / "metadata.json"
@@ -21,6 +25,7 @@ def test_load_metadata(tmp_path, monkeypatch):
     result = model_loader.load_metadata()
 
     assert result == metadata
+
 
 def test_load_encoder(tmp_path, monkeypatch):
     model_dir = tmp_path / "model"
@@ -36,6 +41,7 @@ def test_load_encoder(tmp_path, monkeypatch):
 
     assert result == encoder
 
+
 def test_load_model(tmp_path, monkeypatch):
     model_dir = tmp_path / "model"
     model_dir.mkdir()
@@ -49,6 +55,7 @@ def test_load_model(tmp_path, monkeypatch):
     result = model_loader.load_model("XGboost")
 
     assert result == model
+
 
 def test_load_model_when_file_is_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(model_loader, "ROOT_DIR", tmp_path)

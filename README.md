@@ -61,7 +61,7 @@ The Docker image contains the inference API and model artifacts. Training code a
 To build the image, run from the root of the repo:
 
 ```bash
-docker build -t music-ai .
+docker build -t music-genre-identifier .
 ```
 
 ### Running the container
@@ -69,7 +69,7 @@ docker build -t music-ai .
 To run it, use the following:
 
 ```bash
-docker run --rm -p 8080:8080 music-ai:latest
+docker run --rm -p 8080:8080 music-genre-identifier:latest
 ```
 
 ```bash
