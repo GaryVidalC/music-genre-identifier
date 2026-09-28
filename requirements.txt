@@ -5,4 +5,4 @@ python-multipart==0.0.22
 scikit-learn==1.8.0
 soundfile==0.13.1
 uvicorn==0.41.0
-xgboost==3.2.0
+xgboost-cpu==3.2.0
