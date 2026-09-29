@@ -52,6 +52,11 @@ The upload must be a valid WAV file between 29 and 31 seconds long and no larger
 
 FastAPI also exposes interactive documentation at `http://localhost:8080/docs`.
 
+### Live API
+The API is publicly available on Google Cloud Run.
+- [Base URL](https://music-genre-identifier-j7ngpo2fqq-tl.a.run.app)
+- [Interactive docs](https://music-genre-identifier-j7ngpo2fqq-tl.a.run.app/docs)
+
 ## Running the API with Docker
 
 The Docker image contains the inference API and model artifacts. Training code and data remain outside the runtime image.
