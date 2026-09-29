@@ -48,13 +48,13 @@ jobs:
               with:
                 context: .
                 push: true
-                tags: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPOSITORY }}/${{vars.CLOUD_RUN_SERVICE}}:${{ steps.checkout.outputs.ref }}
+                tags: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPOSITORY }}/${{vars.CLOUD_RUN_SERVICE}}:${{ github.event.workflow_run.head_sha }}
             - name: Deploy to Cloud Run
               id: deploy
               uses: google-github-actions/deploy-cloudrun@v3
               with:
                 service: ${{ vars.CLOUD_RUN_SERVICE }}
-                image: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ steps.checkout.outputs.ref }}
+                image: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ github.event.workflow_run.head_sha }}
                 region: ${{ vars.GCP_REGION }}
                 project_id: ${{ vars.GCP_PROJECT_ID }}
             - name: Health check Cloud Run service
