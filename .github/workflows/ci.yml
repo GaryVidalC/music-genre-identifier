@@ -1,4 +1,4 @@
-name: music-genre-identifier
+name: music-genre-identifier-CI
 run-name: CI
 on: [push, pull_request]
 permissions:
