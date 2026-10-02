@@ -17,12 +17,12 @@ from sklearn.svm import SVC
 from sqlalchemy import null
 from xgboost import XGBClassifier
 
-mlflow.set_tracking_uri("http://localhost:3000")
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
 mlflow.set_experiment("model_selection")
 
 RANDOM_STATE = 42
 TARGET_COLUMN = "genre"
-MODELS = [SVC, RandomForestClassifier, XGBClassifier]
+MODELS = ["SVC", "RandomForest", "XGBClassifier"]
 
 # MODEL_GRIDS = {
 #   "SVM": {
@@ -82,23 +82,26 @@ def load_genre_encoder(encoder_path: Path):
 def train_models(X_train, y_train, X_test, y_test, MODEL_GRIDS = MODELS, ):
     models = {}
     """Train models using the provided hyperparameter grids."""
-    mlflow.sklearn.autolog()  # Enable automatic logging of scikit-learn models
     for model_name in MODEL_GRIDS:
-        if model_name == "SVM":
-            model = make_pipeline(StandardScaler(), SVC(random_state=RANDOM_STATE))
-        elif model_name == "Random Forest":
+        if model_name == "SVC":
+            model = make_pipeline(StandardScaler(), SVC(random_state=RANDOM_STATE, probability=True))
+        elif model_name == "RandomForest":
             model = RandomForestClassifier(random_state=RANDOM_STATE)
-        elif model_name == "XGBoost":
+        elif model_name == "XGBClassifier":
             model = XGBClassifier(random_state=RANDOM_STATE, use_label_encoder=False, eval_metric='mlogloss')
         else:
             raise ValueError(f"Unsupported model: {model_name}")
 
-        
-        if model_name == "SVM":
-            model.fit(X_train, y_train, random_state=RANDOM_STATE, probability=True)
+
+        print(f"Training {model_name}...")
+        start_time = time.perf_counter()
+        if model_name == "SVC":
+            model.fit(X_train, y_train)
         else:
-            model.fit(X_train, y_train, random_state=RANDOM_STATE)
+            model.fit(X_train, y_train)
         models[model_name] = model
+
+        print(f"{model_name} training completed in {time.perf_counter() - start_time:.2f} seconds.")
 
         with mlflow.start_run(run_name=model_name):
             # Log model parameters
@@ -121,6 +124,8 @@ def train_models(X_train, y_train, X_test, y_test, MODEL_GRIDS = MODELS, ):
                 "f1_score": f1
             })
 
+        print(f"{model_name} loaded in MLflow")
+
     return models
                              
 
@@ -139,7 +144,11 @@ def main() -> None:
     X, y = load_features(data_path)
     X_train, X_val, X_test, y_train, y_val, y_test = split_dataset(X, y)
 
+    print(f"Data loaded successfully.")
+    models = train_models(X_train, y_train, X_test, y_test)
+
 
 
 if __name__ == "__main__":
+    print(f"Starting model selection process...")
     main()
