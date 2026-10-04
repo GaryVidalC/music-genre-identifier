@@ -1,16 +1,18 @@
+import json
 import pickle
 import time
-import pandas as pd
+from pathlib import Path
+
 import mlflow
 import optuna
-from pathlib import Path
+import pandas as pd
+from mlflow import MlflowClient
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-from sqlalchemy import null
 from xgboost import XGBClassifier
 
 mlflow.set_tracking_uri("sqlite:///mlflow.db")
@@ -19,6 +21,11 @@ mlflow.set_experiment("model_selection")
 RANDOM_STATE = 42
 TARGET_COLUMN = "genre"
 MODELS = ["SVC", "RandomForest", "XGBClassifier"]
+REGISTERED_MODEL_NAMES = {
+    "SVC": "music-genre-svc",
+    "RandomForest": "music-genre-random-forest",
+    "XGBClassifier": "music-genre-xgboost",
+}
 
 
 def load_features(data_path: Path) -> tuple[pd.DataFrame, pd.Series]:
@@ -28,13 +35,58 @@ def load_features(data_path: Path) -> tuple[pd.DataFrame, pd.Series]:
     target = data[TARGET_COLUMN]
     return features, target
 
+
 def load_genre_encoder(encoder_path: Path):
     """Load genre encoder (LabelEncoder) from pickle file."""
     with encoder_path.open("rb") as file:
         encoder = pickle.load(file)
     return encoder
 
+
+def build_model(model_name, params):
+    """Build a supported classifier with the provided parameters.
+
+    Args:
+        model_name: Name of the model family to build.
+        params: Hyperparameters used to configure the classifier.
+
+    Returns:
+        A configured classifier ready to be trained.
+    """
+    if model_name == "SVC":
+        return make_pipeline(
+            StandardScaler(),
+            SVC(
+                random_state=RANDOM_STATE,
+                probability=True,
+                **params,
+            ),
+        )
+
+    if model_name == "RandomForest":
+        return RandomForestClassifier(random_state=RANDOM_STATE, **params)
+
+    if model_name == "XGBClassifier":
+        return XGBClassifier(
+            random_state=RANDOM_STATE,
+            use_label_encoder=False,
+            eval_metric="mlogloss",
+            **params,
+        )
+
+    raise ValueError(f"Unsupported model: {model_name}")
+
+
 def model_options(trial, model_name):
+    """Sample hyperparameters and build a model for an Optuna trial.
+
+    Args:
+        trial: Optuna trial used to sample hyperparameters.
+        model_name: Name of the model family to optimize.
+
+    Returns:
+        A tuple containing the configured model and sampled parameters.
+    """
     if model_name == "SVC":
         C = trial.suggest_float("C", 0.1, 100, log=True)
         gamma = trial.suggest_categorical("gamma", ["scale", 0.01, 0.1, 1])
@@ -42,7 +94,6 @@ def model_options(trial, model_name):
             "C": C,
             "gamma": gamma,
         }
-        model = make_pipeline(StandardScaler(), SVC(random_state=RANDOM_STATE, probability=True, **params))
 
     elif model_name == "RandomForest":
         n_estimators = trial.suggest_int("n_estimators", 100, 200)
@@ -57,7 +108,6 @@ def model_options(trial, model_name):
             "min_samples_leaf": min_samples_leaf,
             "max_features": max_features,
         }
-        model = RandomForestClassifier(random_state=RANDOM_STATE, **params)
 
     elif model_name == "XGBClassifier":
         learning_rate = trial.suggest_float("learning_rate", 0.01, 1.0)
@@ -66,92 +116,206 @@ def model_options(trial, model_name):
             "learning_rate": learning_rate,
             "max_depth": max_depth,
         }
-        model = XGBClassifier(random_state=RANDOM_STATE, use_label_encoder=False, eval_metric='mlogloss', **params)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
-    return model, params
+
+    return build_model(model_name, params), params
+
+
+def evaluate_model(model, features, target):
+    """Evaluate a trained model and measure its inference time.
+
+    Args:
+        model: Trained classifier to evaluate.
+        features: Feature matrix used for prediction.
+        target: Expected labels for the feature matrix.
+
+    Returns:
+        Accuracy, precision, recall, F1 score, and inference time.
+    """
+    start = time.perf_counter()
+    predictions = model.predict(features)
+    end = time.perf_counter()
+
+    return {
+        "accuracy": accuracy_score(target, predictions),
+        "precision": precision_score(
+            target,
+            predictions,
+            average="weighted",
+            zero_division=0,
+        ),
+        "recall": recall_score(
+            target,
+            predictions,
+            average="weighted",
+            zero_division=0,
+        ),
+        "f1_score": f1_score(
+            target,
+            predictions,
+            average="weighted",
+            zero_division=0,
+        ),
+        "inference_time": end - start,
+    }
+
 
 def objective(trial, model_name, X_train, y_train, X_val, y_val):
-    with mlflow.start_run(nested = True, run_name = f"trial_{trial.number}") as child_run:
+    """Train and evaluate one Optuna trial inside a nested MLflow run.
 
-        model, params =model_options(trial, model_name)
+    Args:
+        trial: Optuna trial containing the sampled values.
+        model_name: Name of the model family being optimized.
+        X_train: Training feature matrix.
+        y_train: Training labels.
+        X_val: Validation feature matrix.
+        y_val: Validation labels.
+
+    Returns:
+        Weighted F1 score used as the Optuna objective value.
+    """
+    with mlflow.start_run(
+        nested=True,
+        run_name=f"trial_{trial.number}",
+    ) as child_run:
+        model, params = model_options(trial, model_name)
+
         mlflow.log_params(params)
         model.fit(X_train, y_train)
 
-        start = time.perf_counter()
-        y_pred = model.predict(X_val)
-        end = time.perf_counter()
-
-        metrics = {
-            "accuracy": accuracy_score(y_val, y_pred),
-            "precision": precision_score(y_val, y_pred, average='weighted', zero_division=0),
-            "recall": recall_score(y_val, y_pred, average='weighted', zero_division=0),
-            "f1_score": f1_score(y_val, y_pred, average='weighted', zero_division=0),
-            "inference_time": end - start
-        }
+        metrics = evaluate_model(model, X_val, y_val)
         mlflow.log_metrics(metrics)
-        if model_name == "RandomForest":
-            mlflow.sklearn.log_model(
-                model,
-                name="model",
-                serialization_format="skops",
-                skops_trusted_types=["sklearn.tree._tree.Tree"],
-            )
-        elif model_name == "XGBClassifier":
-            mlflow.xgboost.log_model(
-                model,
-                name="model",
-                model_format="json",
-            )
-        else:
-            mlflow.sklearn.log_model(
-                model,
-                name="model",
-                serialization_format="skops",
-            )
         trial.set_user_attr("run_id", child_run.info.run_id)
+
         return metrics["f1_score"]
 
+
+def log_best_model(model, model_name, metadata):
+    """Log, register, and alias the final model for one family.
+
+    Args:
+        model: Trained estimator to persist in MLflow.
+        model_name: Model family used to choose its MLflow flavor.
+        metadata: Training and preprocessing metadata stored with the model.
+
+    Returns:
+        Information about the model artifact and registered version.
+    """
+    registered_model_name = REGISTERED_MODEL_NAMES[model_name]
+
+    if model_name == "RandomForest":
+        model_info = mlflow.sklearn.log_model(
+            model,
+            name="model",
+            serialization_format="skops",
+            skops_trusted_types=["sklearn.tree._tree.Tree"],
+            registered_model_name=registered_model_name,
+            metadata=metadata,
+        )
+    elif model_name == "XGBClassifier":
+        model_info = mlflow.xgboost.log_model(
+            model,
+            name="model",
+            model_format="json",
+            registered_model_name=registered_model_name,
+            metadata=metadata,
+        )
+    else:
+        model_info = mlflow.sklearn.log_model(
+            model,
+            name="model",
+            serialization_format="skops",
+            registered_model_name=registered_model_name,
+            metadata=metadata,
+        )
+
+    client = MlflowClient()
+    client.set_registered_model_alias(
+        name=registered_model_name,
+        alias="challenger",
+        version=model_info.registered_model_version,
+    )
+
+    return model_info
+
+
 def main() -> None:
+    """Optimize, train, evaluate, and register each model family."""
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
 
     data_path = project_root / "processed_data/features.parquet"
+    encoder_path = project_root / "model" / "genre_encoder.pkl"
+    read_config_path = project_root / "configs" / "read_config.json"
+
     X, y = load_features(data_path)
+    encoder = load_genre_encoder(encoder_path)
+
+    with read_config_path.open("r", encoding="utf-8") as file:
+        read_config = json.load(file)
+
+    model_metadata = {
+        "preprocessing": read_config,
+        "genre_classes": encoder.classes_.tolist(),
+        "feature_names": X.columns.tolist(),
+        "number_of_samples": int(X.shape[0]),
+        "number_of_features": int(X.shape[1]),
+    }
+
     X_train, X_val, y_train, y_val = train_test_split(
-        X, 
-        y, 
-        test_size=0.2, 
-        random_state=RANDOM_STATE, 
-        stratify=y
+        X,
+        y,
+        test_size=0.2,
+        random_state=RANDOM_STATE,
+        stratify=y,
     )
 
-    print(f"Data loaded successfully.")
-    for model in MODELS:
-        with mlflow.start_run(run_name=model) as run:
+    print("Data loaded successfully.")
+    for model_name in MODELS:
+        with mlflow.start_run(run_name=model_name):
             n_trials = 30
-            mlflow.log_param("n_trials", n_trials)
+            mlflow.log_params({
+                "n_trials": n_trials,
+                "random_state": RANDOM_STATE,
+            })
 
-            study = optuna.create_study(direction="maximize")
+            sampler = optuna.samplers.TPESampler(seed=RANDOM_STATE)
+            study = optuna.create_study(
+                direction="maximize",
+                sampler=sampler,
+            )
             study.optimize(
-                lambda trial: objective(trial, model, X_train, y_train, X_val, y_val), 
-                n_trials=n_trials
+                lambda trial: objective(
+                    trial,
+                    model_name,
+                    X_train,
+                    y_train,
+                    X_val,
+                    y_val,
+                ),
+                n_trials=n_trials,
             )
 
             best_trial = study.best_trial
             mlflow.log_params(best_trial.params)
+            mlflow.set_tags({
+                "dataset": "GTZAN",
+                "model_type": model_name,
+            })
 
             if best_run_id := best_trial.user_attrs.get("run_id"):
-                best_run = mlflow.get_run(best_run_id)
-
-                best_metrics = {
-                    f"best_{name}": value
-                    for name, value in best_run.data.metrics.items()
-                }
-
-                mlflow.log_metrics(best_metrics)
                 mlflow.log_param("best_child_run_id", best_run_id)
 
+            final_model = build_model(model_name, best_trial.params)
+            final_model.fit(X_train, y_train)
+
+            final_metrics = evaluate_model(final_model, X_val, y_val)
+            mlflow.log_metrics(final_metrics)
+
+            log_best_model(final_model, model_name, model_metadata)
+
+
 if __name__ == "__main__":
-    print(f"Starting model selection process...")
+    print("Starting model selection process...")
     main()

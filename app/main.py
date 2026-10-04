@@ -1,9 +1,10 @@
 import fastapi
+import numpy as np
 from fastapi import HTTPException
 from contextlib import asynccontextmanager
-from app.model_loader import load_metadata, load_encoder, load_model
+from app.model_loader import load_model_resources
 from app.audio_processing import feature_extraction
-from app.inference import predict_genre
+from app.inference import predict_all_audio
 import soundfile as sf
 
 # Define lifespan for the app
@@ -13,10 +14,11 @@ import soundfile as sf
 async def lifespan(app: fastapi.FastAPI):
     # Perform any startup tasks here (e.g., load model, encoder, etc.)
     print("Starting up the app...")
-    app.state.metadata = load_metadata()
-    app.state.encoder = load_encoder()
-    model_used = app.state.metadata["model"]["model_used"]
-    app.state.model = load_model(model_used)
+    (
+        app.state.model,
+        app.state.encoder,
+        app.state.metadata,
+    ) = load_model_resources()
     yield
     # Perform any shutdown tasks here (if needed)
     print("Shutting down the app...")
@@ -109,25 +111,6 @@ def validate_wav(file: fastapi.UploadFile):
             detail="Invalid audio file. Please upload a valid .wav file.",
         )
 
-    duration = frames / sample_rate
-
-    if not 29 <= duration <= 31:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Invalid audio duration. Please upload a .wav with aprox "
-                "30 seconds."
-            ),
-        )
-
-    return {
-        "duration": duration,
-        "sample_rate": sample_rate,
-        "channels": channels,
-        "frames": frames,
-    }
-
-
 @app.post("/predict-audio")
 def predict_audio(
     request: fastapi.Request,
@@ -137,28 +120,34 @@ def predict_audio(
 
     validate_wav(file)
 
-    # Extract features from the audio file
-    try:
-        file.file.seek(0)  # Ensure the file pointer is at the beginning
-        features = feature_extraction(file.file, request.app.state.metadata)
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Error extracting features from audio file.",
-        )
+    probabilities = predict_all_audio(
+        model=request.app.state.model,
+        metadata=request.app.state.metadata,
+        audio=file.file,
+        n_max_chunks=10,
+    )
 
-    # Predict genre using the model and encoder
-    try:
-        predicted_genre = predict_genre(
-            features, request.app.state.model, request.app.state.encoder)
-    except Exception:
-        raise HTTPException(
-            status_code=500, detail="Error predicting genre from features.")
+    # predicted genre with encoder
+    prediction_index = np.argmax(probabilities, axis=1)
+    encoded_prediction = request.app.state.model.classes_[
+        prediction_index
+    ]
 
-    result = {"predicted_genre": predicted_genre,
-              "model_name": request.app.state.metadata["model"]["model_name"],
-              "model_used": request.app.state.metadata["model"]["model_used"],
-              "model_version": request.app.state.metadata["model"]["version"],
-              }
+    # Get the ordered list of genres
+    encoded_classes = request.app.state.model.classes_
+    ordered_genres = request.app.state.encoder.inverse_transform(
+        encoded_classes
+    )
+    predicted_genre = request.app.state.encoder.inverse_transform(encoded_prediction)
 
-    return result
+    # store the probabilities in a dictionary with genre names as keys
+    probabilities_dict = {
+        genre: prob for genre, prob in zip(ordered_genres, probabilities[0])
+    }
+
+    return {
+        "predicted_genre": predicted_genre[0],
+        "probabilities": probabilities_dict,
+    }
+
+    

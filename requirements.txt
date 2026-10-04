@@ -6,3 +6,8 @@ scikit-learn==1.8.0
 soundfile==0.13.1
 uvicorn==0.41.0
 xgboost-cpu==3.2.0
+mlflow==3.16.1
+skops==0.16.0
+pandas==3.0.0
+pyarrow==23.0.1
+scipy==1.17.0

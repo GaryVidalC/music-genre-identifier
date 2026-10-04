@@ -50,6 +50,5 @@ plan.md
 
 # data
 data/
-
 mlflow.db
 mlruns/
