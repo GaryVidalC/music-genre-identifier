@@ -8,17 +8,21 @@ Use Docker Compose to start MLflow and the API.
 
 ## Architecture
 
-Docker Compose runs MLflow and FastAPI as separate services. FastAPI loads
+Docker Compose runs MLflow and FastAPI, with an optional `cloudflared` service
+for public access. The live API runs on a Debian homeserver and is exposed
+through Cloudflare Tunnel at `https://api.gvidal.cl`.
+
+FastAPI loads
 `music-genre-classifier@champion` from MLflow during startup and keeps the
 model in memory for inference. MLflow persists runs, registry data, and model
-artifacts in `data/mlflow/`.
+artifacts in `data/mlflow/`. MLflow is not exposed through the public tunnel.
 
 ```text
-Client -> FastAPI -> model in memory
-             |
-             └── MLflow during startup
-                    |
-                    └── data/mlflow/
+Client -> Cloudflare -> cloudflared -> FastAPI -> model in memory
+                                         |
+                                         └── MLflow during startup
+                                                |
+                                                └── data/mlflow/
 ```
 
 ## Data and preprocessing
@@ -55,8 +59,9 @@ WAV upload
     -> mono conversion and resampling to 22,050 Hz
     -> audio feature extraction
     -> champion model prediction
-    -> genre label
+    -> genre label and probabilities for every class
 ```
+
 The model processes audio in 30-second segments. For longer audio, it averages the class probabilities across up to ten segments.
 
 ## API
@@ -70,8 +75,28 @@ The model processes audio in 30-second segments. For longer audio, it averages t
 
 FastAPI also exposes interactive documentation at `http://localhost:8080/docs`.
 
-### Live API (OUTDATED API)
-The API is publicly available on Google Cloud Run.
+### Live API
+
+- [Interactive docs](https://api.gvidal.cl/docs)
+- [Model information](https://api.gvidal.cl/model-info)
+- Base URL: `https://api.gvidal.cl`
+
+In the interactive docs, open `POST /predict-audio`, select **Try it out**,
+upload a WAV file, and select **Execute**. You can also send a request with:
+
+```bash
+curl -F "file=@clip.wav" https://api.gvidal.cl/predict-audio
+```
+
+The JSON response contains `predicted_genre`, the class with the highest
+probability, and `probabilities`, a mapping from each genre to a value between
+0 and 1.
+
+### Previous Cloud Run deployment (outdated)
+
+The previous deployment used Google Cloud Run. These links are retained as
+historical references; the current API uses the homeserver deployment above.
+
 - [Base URL](https://music-genre-identifier-j7ngpo2fqq-tl.a.run.app)
 - [Interactive docs](https://music-genre-identifier-j7ngpo2fqq-tl.a.run.app/docs)
 
@@ -116,6 +141,23 @@ After the first setup, you can start the services with:
 docker compose up -d
 ```
 
+## Public access with Cloudflare Tunnel
+
+Once the API is running, you can create a remotely managed tunnel in Cloudflare and
+store its token in a `.env` file at the repository root on the server:
+
+```dotenv
+CLOUDFLARE_TUNNEL_TOKEN=your_tunnel_token
+```
+
+The `.env` file is ignored by Git. Compose passes this value to `cloudflared`
+as `TUNNEL_TOKEN`.
+
+Start the optional connector:
+
+```bash
+docker compose --profile public up -d cloudflared
+```
 ## Tests
 
 Install the development dependencies and run the test suite:
@@ -136,7 +178,7 @@ processed_data/  Extracted features used during training
 tests/           Unit and API tests
 Dockerfile       Container image definition for FastAPI
 .dockerignore    Files excluded from the Docker build context
-compose.yaml     Docker Compose definition for MLflow and FastAPI
+compose.yaml     MLflow, FastAPI, and optional Cloudflare Tunnel services
 ```
 
 ## Limitations
