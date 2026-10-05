@@ -130,9 +130,9 @@ python -m pytest -q
 ```text
 app/             FastAPI service and inference code
 configs/         Preprocessing configuration
-model/           Label encoder and legacy metadata
+model/           Label encoder used during training
 src/             Data processing and MLflow training
-processed_data/  Extracted features and dataset splits
+processed_data/  Extracted features used during training
 tests/           Unit and API tests
 Dockerfile       Container image definition for FastAPI
 .dockerignore    Files excluded from the Docker build context

@@ -9,7 +9,12 @@ import optuna
 import pandas as pd
 from mlflow import MlflowClient
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -71,7 +76,10 @@ def build_model(model_name, params):
     raise ValueError(f"Unsupported model: {model_name}")
 
 
-def model_options(trial, model_name):
+def model_options(
+    trial: optuna.Trial,
+    model_name: str,
+) -> tuple[object, dict[str, object]]:
     """Sample hyperparameters and build a model for an Optuna trial.
 
     Args:
@@ -94,7 +102,8 @@ def model_options(trial, model_name):
         max_depth = trial.suggest_int("max_depth", 10, 20)
         min_samples_split = trial.suggest_int("min_samples_split", 2, 6)
         min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 4)
-        max_features = trial.suggest_categorical("max_features", ["sqrt", "log2"])
+        max_features = trial.suggest_categorical(
+            "max_features", ["sqrt", "log2"])
         params = {
             "n_estimators": n_estimators,
             "max_depth": max_depth,
