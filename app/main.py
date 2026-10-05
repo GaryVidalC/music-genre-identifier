@@ -3,7 +3,6 @@ import numpy as np
 from fastapi import HTTPException
 from contextlib import asynccontextmanager
 from app.model_loader import load_model_resources
-from app.audio_processing import feature_extraction
 from app.inference import predict_all_audio
 import soundfile as sf
 
@@ -111,6 +110,7 @@ def validate_wav(file: fastapi.UploadFile):
             detail="Invalid audio file. Please upload a valid .wav file.",
         )
 
+
 @app.post("/predict-audio")
 def predict_audio(
     request: fastapi.Request,
@@ -138,7 +138,9 @@ def predict_audio(
     ordered_genres = request.app.state.encoder.inverse_transform(
         encoded_classes
     )
-    predicted_genre = request.app.state.encoder.inverse_transform(encoded_prediction)
+    predicted_genre = request.app.state.encoder.inverse_transform(
+        encoded_prediction
+    )
 
     # store the probabilities in a dictionary with genre names as keys
     probabilities_dict = {
@@ -149,5 +151,3 @@ def predict_audio(
         "predicted_genre": predicted_genre[0],
         "probabilities": probabilities_dict,
     }
-
-    

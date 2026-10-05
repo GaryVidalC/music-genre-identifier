@@ -11,3 +11,6 @@ processed_data/
 src/
 .env
 tests/
+.backup/
+mlflow.db
+mlruns/

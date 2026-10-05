@@ -24,7 +24,7 @@ def configure_mlflow(
     monkeypatch,
     flavors,
     custom_metadata=None,
-    model_name="music-genre-svc",
+    model_name="music-genre-classifier",
     model_alias="champion",
 ):
     """Configure mocked MLflow registry, run, and model information."""
@@ -95,8 +95,8 @@ def test_load_model_resources_uses_defaults_and_sklearn(monkeypatch):
     model, encoder, metadata = model_loader.load_model_resources()
 
     assert model is expected_model
-    assert tracking_uris == ["sqlite:///mlflow.db"]
-    assert loaded_uris == ["models:/music-genre-svc/7"]
+    assert tracking_uris == ["http://localhost:5000"]
+    assert loaded_uris == ["models:/music-genre-classifier/7"]
     assert encoder.inverse_transform([0, 2]).tolist() == ["blues", "rock"]
     assert metadata == {
         "dataset": "GTZAN",
@@ -114,7 +114,7 @@ def test_load_model_resources_uses_defaults_and_sklearn(monkeypatch):
             "features": ["mean_mfcc_0", "std_mfcc_0"],
         },
         "model": {
-            "model_name": "music-genre-svc",
+            "model_name": "music-genre-classifier",
             "model_used": "SVC",
             "version": 7,
             "alias": "champion",
@@ -164,7 +164,11 @@ def test_load_model_resources_rejects_missing_metadata(monkeypatch):
         {"python_function": {}, "sklearn": {}},
         custom_metadata={"preprocessing": {}},
     )
-    monkeypatch.setattr(model_loader.mlflow, "set_tracking_uri", lambda uri: None)
+    monkeypatch.setattr(
+        model_loader.mlflow,
+        "set_tracking_uri",
+        lambda uri: None,
+    )
 
     with pytest.raises(ValueError, match="metadata is missing"):
         model_loader.load_model_resources()
@@ -172,7 +176,11 @@ def test_load_model_resources_rejects_missing_metadata(monkeypatch):
 
 def test_load_model_resources_rejects_unsupported_flavor(monkeypatch):
     configure_mlflow(monkeypatch, {"python_function": {}})
-    monkeypatch.setattr(model_loader.mlflow, "set_tracking_uri", lambda uri: None)
+    monkeypatch.setattr(
+        model_loader.mlflow,
+        "set_tracking_uri",
+        lambda uri: None,
+    )
 
     with pytest.raises(ValueError, match="Unsupported MLflow model flavor"):
         model_loader.load_model_resources()

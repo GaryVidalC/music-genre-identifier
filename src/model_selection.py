@@ -1,4 +1,5 @@
 import json
+import os
 import pickle
 import time
 from pathlib import Path
@@ -15,17 +16,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
-mlflow.set_tracking_uri("sqlite:///mlflow.db")
-mlflow.set_experiment("model_selection")
-
 RANDOM_STATE = 42
 TARGET_COLUMN = "genre"
 MODELS = ["SVC", "RandomForest", "XGBClassifier"]
-REGISTERED_MODEL_NAMES = {
-    "SVC": "music-genre-svc",
-    "RandomForest": "music-genre-random-forest",
-    "XGBClassifier": "music-genre-xgboost",
-}
+REGISTERED_MODEL_NAME = "music-genre-classifier"
 
 
 def load_features(data_path: Path) -> tuple[pd.DataFrame, pd.Series]:
@@ -191,8 +185,12 @@ def objective(trial, model_name, X_train, y_train, X_val, y_val):
         return metrics["f1_score"]
 
 
-def log_best_model(model, model_name, metadata):
-    """Log, register, and alias the final model for one family.
+def log_best_model(
+    model: object,
+    model_name: str,
+    metadata: dict[str, object],
+) -> object:
+    """Log, register the final candidate model for one family.
 
     Args:
         model: Trained estimator to persist in MLflow.
@@ -202,7 +200,6 @@ def log_best_model(model, model_name, metadata):
     Returns:
         Information about the model artifact and registered version.
     """
-    registered_model_name = REGISTERED_MODEL_NAMES[model_name]
 
     if model_name == "RandomForest":
         model_info = mlflow.sklearn.log_model(
@@ -210,7 +207,7 @@ def log_best_model(model, model_name, metadata):
             name="model",
             serialization_format="skops",
             skops_trusted_types=["sklearn.tree._tree.Tree"],
-            registered_model_name=registered_model_name,
+            registered_model_name=REGISTERED_MODEL_NAME,
             metadata=metadata,
         )
     elif model_name == "XGBClassifier":
@@ -218,7 +215,7 @@ def log_best_model(model, model_name, metadata):
             model,
             name="model",
             model_format="json",
-            registered_model_name=registered_model_name,
+            registered_model_name=REGISTERED_MODEL_NAME,
             metadata=metadata,
         )
     else:
@@ -226,16 +223,9 @@ def log_best_model(model, model_name, metadata):
             model,
             name="model",
             serialization_format="skops",
-            registered_model_name=registered_model_name,
+            registered_model_name=REGISTERED_MODEL_NAME,
             metadata=metadata,
         )
-
-    client = MlflowClient()
-    client.set_registered_model_alias(
-        name=registered_model_name,
-        alias="challenger",
-        version=model_info.registered_model_version,
-    )
 
     return model_info
 
@@ -245,6 +235,15 @@ def main() -> None:
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
 
+    # setting up MLflow tracking URI and experiment
+    tracking_uri = os.getenv(
+        "MLFLOW_TRACKING_URI",
+        "http://localhost:5000",
+    )
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment("model_selection")
+
+    # loading data
     data_path = project_root / "processed_data/features.parquet"
     encoder_path = project_root / "model" / "genre_encoder.pkl"
     read_config_path = project_root / "configs" / "read_config.json"
@@ -272,6 +271,8 @@ def main() -> None:
     )
 
     print("Data loaded successfully.")
+    models_f1 = {}
+    model_versions = {}
     for model_name in MODELS:
         with mlflow.start_run(run_name=model_name):
             n_trials = 30
@@ -313,7 +314,24 @@ def main() -> None:
             final_metrics = evaluate_model(final_model, X_val, y_val)
             mlflow.log_metrics(final_metrics)
 
-            log_best_model(final_model, model_name, model_metadata)
+            model_info = log_best_model(
+                final_model,
+                model_name,
+                model_metadata,
+            )
+            model_versions[model_name] = model_info.registered_model_version
+            models_f1[model_name] = final_metrics["f1_score"]
+
+    max_model_name = max(models_f1, key=models_f1.get)
+    max_model_version = model_versions[max_model_name]
+
+    # Assign the champion alias to the candidate with the highest F1 score.
+    client = MlflowClient()
+    client.set_registered_model_alias(
+        name=REGISTERED_MODEL_NAME,
+        alias="champion",
+        version=max_model_version,
+    )
 
 
 if __name__ == "__main__":

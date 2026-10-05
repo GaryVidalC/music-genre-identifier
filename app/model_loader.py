@@ -7,8 +7,8 @@ from mlflow import sklearn as mlflow_sklearn
 from mlflow import xgboost as mlflow_xgboost
 from sklearn.preprocessing import LabelEncoder
 
-DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"
-DEFAULT_MODEL_NAME = "music-genre-svc"
+DEFAULT_TRACKING_URI = "http://localhost:5000"
+DEFAULT_MODEL_NAME = "music-genre-classifier"
 DEFAULT_MODEL_ALIAS = "champion"
 REQUIRED_METADATA_FIELDS = {
     "preprocessing",
