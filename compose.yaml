@@ -1,0 +1,29 @@
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.16.1
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=sqlite:////mlflow-data/mlflow.db
+      - --artifacts-destination=/mlflow-data/artifacts
+      - --allowed-hosts=localhost:*,127.0.0.1:*,mlflow:5000
+      - --workers=1
+    volumes:
+      - ./data/mlflow:/mlflow-data
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: unless-stopped
+  api:
+    build:
+      context: .
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_MODEL_NAME: music-genre-classifier
+      MLFLOW_MODEL_ALIAS: champion
+    depends_on:
+      - mlflow
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

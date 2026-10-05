@@ -1,36 +1,30 @@
 import json
+import os
 import pickle
 import time
 from pathlib import Path
 
-import joblib
-import matplotlib.pyplot as plt
+import mlflow
+import optuna
 import pandas as pd
-import seaborn as sns
+from mlflow import MlflowClient
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
-from sklearn.model_selection import GridSearchCV, train_test_split
-from sklearn.pipeline import Pipeline
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+)
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
 RANDOM_STATE = 42
 TARGET_COLUMN = "genre"
-REQUIRED_MODELS = ("SVM", "Random Forest", "XGBoost")
-
-
-def load_model_grids(config_path: Path) -> dict:
-    """Load hyperparameter grids from JSON and validate required model keys."""
-    with config_path.open("r", encoding="utf-8") as file:
-        grids = json.load(file)
-
-    missing = [model_name for model_name in REQUIRED_MODELS if model_name not in grids]
-    if missing:
-        missing_text = ", ".join(missing)
-        raise ValueError(f"Missing model grids in JSON: {missing_text}")
-
-    return grids
+MODELS = ["SVC", "RandomForest", "XGBClassifier"]
+REGISTERED_MODEL_NAME = "music-genre-classifier"
 
 
 def load_features(data_path: Path) -> tuple[pd.DataFrame, pd.Series]:
@@ -41,57 +35,6 @@ def load_features(data_path: Path) -> tuple[pd.DataFrame, pd.Series]:
     return features, target
 
 
-def split_dataset(features: pd.DataFrame, target: pd.Series):
-    """Create train, validation and test sets with a 70/15/15 split."""
-    X_train, X_temp, y_train, y_temp = train_test_split(
-        features,
-        target,
-        test_size=0.30,
-        random_state=RANDOM_STATE,
-        stratify=target,
-    )
-    X_val, X_test, y_val, y_test = train_test_split(
-        X_temp,
-        y_temp,
-        test_size=0.50,
-        random_state=RANDOM_STATE,
-        stratify=y_temp,
-    )
-
-    return X_train, X_val, X_test, y_train, y_val, y_test
-
-
-def build_model_registry(model_grids: dict) -> list[tuple[str, object, dict, bool]]:
-    """Map each model name to its estimator, grid, and whether scaling is required."""
-    return [
-        ("SVM", SVC(random_state=RANDOM_STATE), model_grids["SVM"], True),
-        (
-            "Random Forest",
-            RandomForestClassifier(random_state=RANDOM_STATE),
-            model_grids["Random Forest"],
-            False,
-        ),
-        (
-            "XGBoost",
-            XGBClassifier(
-                random_state=RANDOM_STATE,
-                eval_metric="mlogloss",
-            ),
-            model_grids["XGBoost"],
-            False,
-        ),
-    ]
-
-
-def make_pipeline(estimator, with_scaler: bool) -> Pipeline:
-    """Build a pipeline and include feature scaling only when needed."""
-    steps = []
-    if with_scaler:
-        steps.append(("scaler", StandardScaler()))
-    steps.append(("classifier", estimator))
-    return Pipeline(steps)
-
-
 def load_genre_encoder(encoder_path: Path):
     """Load genre encoder (LabelEncoder) from pickle file."""
     with encoder_path.open("rb") as file:
@@ -99,189 +42,307 @@ def load_genre_encoder(encoder_path: Path):
     return encoder
 
 
-def compute_metrics(y_true, y_pred, average="macro") -> tuple[float, float, float]:
-    """Return precision, recall and F1 metrics."""
-    precision = precision_score(y_true, y_pred, average=average, zero_division=0)
-    recall = recall_score(y_true, y_pred, average=average, zero_division=0)
-    f1 = f1_score(y_true, y_pred, average=average, zero_division=0)
-    return precision, recall, f1
+def build_model(model_name, params):
+    """Build a supported classifier with the provided parameters.
 
+    Args:
+        model_name: Name of the model family to build.
+        params: Hyperparameters used to configure the classifier.
 
-def save_trained_model(model, model_name: str, output_dir: Path) -> None:
-    """Save trained model pipeline using joblib."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = output_dir / f"{model_name.lower().replace(' ', '_')}_model.pkl"
-    joblib.dump(model, model_path)
-    print(f"Model saved: {model_path}")
-
-
-def plot_confusion_matrix(y_true, y_pred, model_name: str, genre_encoder, output_dir: Path) -> None:
-    """Generate and save confusion matrix heatmap for a model."""
-    cm = confusion_matrix(y_true, y_pred)
-    genre_labels = genre_encoder.classes_
-
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=genre_labels,
-        yticklabels=genre_labels,
-    )
-    plt.title(f"Confusion Matrix - {model_name}")
-    plt.ylabel("True Genre")
-    plt.xlabel("Predicted Genre")
-    plt.xticks(rotation=45, ha="right")
-    plt.yticks(rotation=0)
-    plt.tight_layout()
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{model_name.lower().replace(' ', '_')}_confusion_matrix.png"
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
-    plt.close()
-    print(f"Confusion matrix saved: {output_path}")
-
-
-def train_and_score_models(
-    X_train: pd.DataFrame,
-    X_val: pd.DataFrame,
-    X_test: pd.DataFrame,
-    y_train: pd.Series,
-    y_val: pd.Series,
-    y_test: pd.Series,
-    model_registry: list[tuple[str, object, dict, bool]],
-    genre_encoder,
-    confusion_matrices_dir: Path,
-    models_output_dir: Path,
-) -> pd.DataFrame:
-    """Run grid search on training set only, evaluate on validation and test sets.
-
-    Process:
-    1. GridSearchCV finds best hyperparams using 5-fold CV within train set (Tuning_CV).
-    2. Evaluate best model on validation set (clean, Val_Score).
-    3. Refit on train+val and evaluate on test set (final assessment, Test_Score).
-    4. Generate confusion matrix heatmap for test predictions.
-    5. Save trained model for later inference.
+    Returns:
+        A configured classifier ready to be trained.
     """
-    results = []
-
-    for model_name, estimator, grid, with_scaler in model_registry:
-        print(f"Training {model_name}...")
-        pipeline = make_pipeline(estimator, with_scaler)
-
-        # Grid search on training set only (no contamination from val).
-        search = GridSearchCV(
-            estimator=pipeline,
-            param_grid=grid,
-            cv=5,
-            scoring="f1_macro",
-            refit=True,
-        )
-        search.fit(X_train, y_train)
-
-        # Evaluate on validation set (clean, no data leakage).
-        val_score = search.score(X_val, y_val)
-        y_val_pred = search.best_estimator_.predict(X_val)
-        val_precision, val_recall, val_f1 = compute_metrics(y_val, y_val_pred, average="macro")
-
-        # Refit best model on train+val for test evaluation.
-        X_combined = pd.concat([X_train, X_val], axis=0)
-        y_combined = pd.concat([y_train, y_val], axis=0)
-        search.best_estimator_.fit(X_combined, y_combined)
-
-        # Evaluate on test set (final assessment).
-        test_score = search.score(X_test, y_test)
-        start_time = time.perf_counter()
-        y_test_pred = search.best_estimator_.predict(X_test)
-        elapsed = time.perf_counter() - start_time
-        avg_inference_ms = (elapsed / max(len(X_test), 1)) * 1000
-        test_precision, test_recall, test_f1_macro = compute_metrics(
-            y_test,
-            y_test_pred,
-            average="macro",
-        )
-        test_f1_weighted = f1_score(y_test, y_test_pred, average="weighted", zero_division=0)
-        test_accuracy = accuracy_score(y_test, y_test_pred)
-
-        # Generate and save confusion matrix.
-        plot_confusion_matrix(y_test, y_test_pred, model_name, genre_encoder, confusion_matrices_dir)
-
-        # Save trained model for inference.
-        save_trained_model(search.best_estimator_, model_name, models_output_dir)
-
-        results.append(
-            {
-                "Model": model_name,
-                "Tuning_CV_F1": round(search.best_score_, 4),
-                "Test_F1_Macro": round(test_f1_macro, 4),
-                "Test_Accuracy": round(test_accuracy, 4),
-                "Test_F1_Weighted": round(test_f1_weighted, 4),
-                "Test_Precision_Macro": round(test_precision, 4),
-                "Test_Recall_Macro": round(test_recall, 4),
-                "Test_Inference_ms": round(avg_inference_ms, 4),
-            }
+    if model_name == "SVC":
+        return make_pipeline(
+            StandardScaler(),
+            SVC(
+                random_state=RANDOM_STATE,
+                probability=True,
+                **params,
+            ),
         )
 
-        print(
-            f"{model_name} - Tuning_CV: {search.best_score_:.4f}, "
-            f"Val: {val_score:.4f}, Test: {test_score:.4f}"
+    if model_name == "RandomForest":
+        return RandomForestClassifier(random_state=RANDOM_STATE, **params)
+
+    if model_name == "XGBClassifier":
+        return XGBClassifier(
+            random_state=RANDOM_STATE,
+            use_label_encoder=False,
+            eval_metric="mlogloss",
+            **params,
         )
 
-    return pd.DataFrame(results)
+    raise ValueError(f"Unsupported model: {model_name}")
 
 
-def save_results(results_df: pd.DataFrame, results_path: Path) -> None:
-    """Save model comparison results to CSV."""
-    results_path.parent.mkdir(parents=True, exist_ok=True)
-    results_df.to_csv(results_path, index=False)
-    print(f"\nResults saved to: {results_path}")
-    print(results_df)
+def model_options(
+    trial: optuna.Trial,
+    model_name: str,
+) -> tuple[object, dict[str, object]]:
+    """Sample hyperparameters and build a model for an Optuna trial.
+
+    Args:
+        trial: Optuna trial used to sample hyperparameters.
+        model_name: Name of the model family to optimize.
+
+    Returns:
+        A tuple containing the configured model and sampled parameters.
+    """
+    if model_name == "SVC":
+        C = trial.suggest_float("C", 0.1, 100, log=True)
+        gamma = trial.suggest_categorical("gamma", ["scale", 0.01, 0.1, 1])
+        params = {
+            "C": C,
+            "gamma": gamma,
+        }
+
+    elif model_name == "RandomForest":
+        n_estimators = trial.suggest_int("n_estimators", 100, 200)
+        max_depth = trial.suggest_int("max_depth", 10, 20)
+        min_samples_split = trial.suggest_int("min_samples_split", 2, 6)
+        min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 4)
+        max_features = trial.suggest_categorical(
+            "max_features", ["sqrt", "log2"])
+        params = {
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "min_samples_split": min_samples_split,
+            "min_samples_leaf": min_samples_leaf,
+            "max_features": max_features,
+        }
+
+    elif model_name == "XGBClassifier":
+        learning_rate = trial.suggest_float("learning_rate", 0.01, 1.0)
+        max_depth = trial.suggest_int("max_depth", 3, 10)
+        params = {
+            "learning_rate": learning_rate,
+            "max_depth": max_depth,
+        }
+    else:
+        raise ValueError(f"Unsupported model: {model_name}")
+
+    return build_model(model_name, params), params
+
+
+def evaluate_model(model, features, target):
+    """Evaluate a trained model and measure its inference time.
+
+    Args:
+        model: Trained classifier to evaluate.
+        features: Feature matrix used for prediction.
+        target: Expected labels for the feature matrix.
+
+    Returns:
+        Accuracy, precision, recall, F1 score, and inference time.
+    """
+    start = time.perf_counter()
+    predictions = model.predict(features)
+    end = time.perf_counter()
+
+    return {
+        "accuracy": accuracy_score(target, predictions),
+        "precision": precision_score(
+            target,
+            predictions,
+            average="weighted",
+            zero_division=0,
+        ),
+        "recall": recall_score(
+            target,
+            predictions,
+            average="weighted",
+            zero_division=0,
+        ),
+        "f1_score": f1_score(
+            target,
+            predictions,
+            average="weighted",
+            zero_division=0,
+        ),
+        "inference_time": end - start,
+    }
+
+
+def objective(trial, model_name, X_train, y_train, X_val, y_val):
+    """Train and evaluate one Optuna trial inside a nested MLflow run.
+
+    Args:
+        trial: Optuna trial containing the sampled values.
+        model_name: Name of the model family being optimized.
+        X_train: Training feature matrix.
+        y_train: Training labels.
+        X_val: Validation feature matrix.
+        y_val: Validation labels.
+
+    Returns:
+        Weighted F1 score used as the Optuna objective value.
+    """
+    with mlflow.start_run(
+        nested=True,
+        run_name=f"trial_{trial.number}",
+    ) as child_run:
+        model, params = model_options(trial, model_name)
+
+        mlflow.log_params(params)
+        model.fit(X_train, y_train)
+
+        metrics = evaluate_model(model, X_val, y_val)
+        mlflow.log_metrics(metrics)
+        trial.set_user_attr("run_id", child_run.info.run_id)
+
+        return metrics["f1_score"]
+
+
+def log_best_model(
+    model: object,
+    model_name: str,
+    metadata: dict[str, object],
+) -> object:
+    """Log, register the final candidate model for one family.
+
+    Args:
+        model: Trained estimator to persist in MLflow.
+        model_name: Model family used to choose its MLflow flavor.
+        metadata: Training and preprocessing metadata stored with the model.
+
+    Returns:
+        Information about the model artifact and registered version.
+    """
+
+    if model_name == "RandomForest":
+        model_info = mlflow.sklearn.log_model(
+            model,
+            name="model",
+            serialization_format="skops",
+            skops_trusted_types=["sklearn.tree._tree.Tree"],
+            registered_model_name=REGISTERED_MODEL_NAME,
+            metadata=metadata,
+        )
+    elif model_name == "XGBClassifier":
+        model_info = mlflow.xgboost.log_model(
+            model,
+            name="model",
+            model_format="json",
+            registered_model_name=REGISTERED_MODEL_NAME,
+            metadata=metadata,
+        )
+    else:
+        model_info = mlflow.sklearn.log_model(
+            model,
+            name="model",
+            serialization_format="skops",
+            registered_model_name=REGISTERED_MODEL_NAME,
+            metadata=metadata,
+        )
+
+    return model_info
 
 
 def main() -> None:
+    """Optimize, train, evaluate, and register each model family."""
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
 
-    data_path = project_root / "processed_data/features.parquet"
-    grids_path = project_root / "configs/model_grids.json"
-    encoder_path = project_root / "model/genre_encoder.pkl"
-    results_path = project_root / "model/model_selection/model_results.csv"
-    confusion_matrices_dir = project_root / "model/model_selection/confusion_matrices"
-    models_output_dir = project_root / "model/model_selection"
-
-    model_grids = load_model_grids(grids_path)
-    genre_encoder = load_genre_encoder(encoder_path)
-    X, y = load_features(data_path)
-    X_train, X_val, X_test, y_train, y_val, y_test = split_dataset(X, y)
-    model_registry = build_model_registry(model_grids)
-
-    results_df = train_and_score_models(
-        X_train,
-        X_val,
-        X_test,
-        y_train,
-        y_val,
-        y_test,
-        model_registry,
-        genre_encoder,
-        confusion_matrices_dir,
-        models_output_dir,
+    # setting up MLflow tracking URI and experiment
+    tracking_uri = os.getenv(
+        "MLFLOW_TRACKING_URI",
+        "http://localhost:5000",
     )
-    # Save X train, y train, X val, y val, X test, y test in parquet format
-    split_output_dir = project_root / "processed_data/train_val_test"
-    split_output_dir.mkdir(parents=True, exist_ok=True)
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment("model_selection")
 
-    X_train.to_parquet(split_output_dir / "X_train.parquet")
-    y_train.to_frame(name=TARGET_COLUMN).to_parquet(split_output_dir / "y_train.parquet")
-    X_val.to_parquet(split_output_dir / "X_val.parquet")
-    y_val.to_frame(name=TARGET_COLUMN).to_parquet(split_output_dir / "y_val.parquet")
-    X_test.to_parquet(split_output_dir / "X_test.parquet")
-    y_test.to_frame(name=TARGET_COLUMN).to_parquet(split_output_dir / "y_test.parquet")
+    # loading data
+    data_path = project_root / "processed_data/features.parquet"
+    encoder_path = project_root / "model" / "genre_encoder.pkl"
+    read_config_path = project_root / "configs" / "read_config.json"
 
-    save_results(results_df, results_path)
+    X, y = load_features(data_path)
+    encoder = load_genre_encoder(encoder_path)
 
+    with read_config_path.open("r", encoding="utf-8") as file:
+        read_config = json.load(file)
+
+    model_metadata = {
+        "preprocessing": read_config,
+        "genre_classes": encoder.classes_.tolist(),
+        "feature_names": X.columns.tolist(),
+        "number_of_samples": int(X.shape[0]),
+        "number_of_features": int(X.shape[1]),
+    }
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=RANDOM_STATE,
+        stratify=y,
+    )
+
+    print("Data loaded successfully.")
+    models_f1 = {}
+    model_versions = {}
+    for model_name in MODELS:
+        with mlflow.start_run(run_name=model_name):
+            n_trials = 30
+            mlflow.log_params({
+                "n_trials": n_trials,
+                "random_state": RANDOM_STATE,
+            })
+
+            sampler = optuna.samplers.TPESampler(seed=RANDOM_STATE)
+            study = optuna.create_study(
+                direction="maximize",
+                sampler=sampler,
+            )
+            study.optimize(
+                lambda trial: objective(
+                    trial,
+                    model_name,
+                    X_train,
+                    y_train,
+                    X_val,
+                    y_val,
+                ),
+                n_trials=n_trials,
+            )
+
+            best_trial = study.best_trial
+            mlflow.log_params(best_trial.params)
+            mlflow.set_tags({
+                "dataset": "GTZAN",
+                "model_type": model_name,
+            })
+
+            if best_run_id := best_trial.user_attrs.get("run_id"):
+                mlflow.log_param("best_child_run_id", best_run_id)
+
+            final_model = build_model(model_name, best_trial.params)
+            final_model.fit(X_train, y_train)
+
+            final_metrics = evaluate_model(final_model, X_val, y_val)
+            mlflow.log_metrics(final_metrics)
+
+            model_info = log_best_model(
+                final_model,
+                model_name,
+                model_metadata,
+            )
+            model_versions[model_name] = model_info.registered_model_version
+            models_f1[model_name] = final_metrics["f1_score"]
+
+    max_model_name = max(models_f1, key=models_f1.get)
+    max_model_version = model_versions[max_model_name]
+
+    # Assign the champion alias to the candidate with the highest F1 score.
+    client = MlflowClient()
+    client.set_registered_model_alias(
+        name=REGISTERED_MODEL_NAME,
+        alias="champion",
+        version=max_model_version,
+    )
 
 
 if __name__ == "__main__":
+    print("Starting model selection process...")
     main()

@@ -47,6 +47,8 @@ htmlcov/
 
 # files
 plan.md
-
+pasos.md
 # data
 data/
+mlflow.db
+mlruns/

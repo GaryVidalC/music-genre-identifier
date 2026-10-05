@@ -1,20 +1,25 @@
 # Music Genre Classification API
 
-This project classifies 30-second WAV clips into one of ten music genres. It covers the full path from audio preprocessing and feature extraction to model comparison and inference through a FastAPI service.
+This project classifies WAV clips into one of ten music genres. It covers the full path from audio preprocessing and feature extraction to model comparison and inference through a FastAPI service.
 
 The supported genres are blues, classical, country, disco, hiphop, jazz, metal, pop, reggae, and rock.
 
-Use Docker to start the API.
+Use Docker Compose to start MLflow and the API.
 
-## Results
+## Architecture
 
-Three classifiers were trained and evaluated on the same split. XGBoost produced the best test macro F1 and is the model served by the API.
+Docker Compose runs MLflow and FastAPI as separate services. FastAPI loads
+`music-genre-classifier@champion` from MLflow during startup and keeps the
+model in memory for inference. MLflow persists runs, registry data, and model
+artifacts in `data/mlflow/`.
 
-| Model | Test macro F1 | Test accuracy | Inference per sample |
-|---|---:|---:|---:|
-| SVM | 0.6520 | 0.6533 | 0.0534 ms |
-| Random Forest | 0.6500 | 0.6533 | 0.1391 ms |
-| XGBoost | **0.6645** | **0.6667** | **0.0449 ms** |
+```text
+Client -> FastAPI -> model in memory
+             |
+             └── MLflow during startup
+                    |
+                    └── data/mlflow/
+```
 
 ## Data and preprocessing
 
@@ -26,20 +31,33 @@ Each clip is converted to mono at 22,050 Hz, normalized, and standardized to 30 
 - Mean and standard deviation of 12 chroma bins: 24 features
 - Mean and standard deviation of spectral centroid, bandwidth, and rolloff: 6 features
 
-SVM, Random Forest, and XGBoost were tuned with 5-fold cross-validation. The final comparison uses a held-out test split.
+SVC, Random Forest, and XGBoost were hyperparameter-tuned with Optuna and tracked with MLflow using a fixed random seed and 30 trials per model.
+
+## Results
+
+Three classifiers were trained and evaluated on the same validation split.
+
+| Model | F1 score | Precision | Recall | Inference time (seconds) |
+|---|---:|---:|---:|---:|
+| SVC | **0.73** | **0.75** | **0.73** | **0.008** |
+| Random Forest | 0.69 | 0.71 | 0.69 | 0.011 |
+| XGBoost | 0.68 | 0.70 | 0.69 | 0.005 |
+
+The script automatically selects the champion model SVC with parameters:
+- C = 2.223
+- gamma = scale
 
 ## How inference works
 
 ```text
 WAV upload
-    -> format, size, and duration validation
+    -> format and size validation
     -> mono conversion and resampling to 22,050 Hz
     -> audio feature extraction
-    -> XGBoost prediction
+    -> champion model prediction
     -> genre label
 ```
-
-The upload must be a valid WAV file between 29 and 31 seconds long and no larger than 100 MiB. Audio with a different sample rate is resampled before feature extraction.
+The model processes audio in 30-second segments. For longer audio, it averages the class probabilities across up to ten segments.
 
 ## API
 
@@ -48,49 +66,54 @@ The upload must be a valid WAV file between 29 and 31 seconds long and no larger
 | `GET` | `/health` | Confirms that the API process is running |
 | `GET` | `/ready` | Reports whether the model, encoder, and metadata are loaded |
 | `GET` | `/model-info` | Returns model and preprocessing metadata |
-| `POST` | `/predict-audio` | Accepts a WAV upload and returns the predicted genre |
+| `POST` | `/predict-audio` | Accepts a WAV upload and returns the predicted genre and probabilities by class |
 
 FastAPI also exposes interactive documentation at `http://localhost:8080/docs`.
 
-### Live API
+### Live API (OUTDATED API)
 The API is publicly available on Google Cloud Run.
 - [Base URL](https://music-genre-identifier-j7ngpo2fqq-tl.a.run.app)
 - [Interactive docs](https://music-genre-identifier-j7ngpo2fqq-tl.a.run.app/docs)
 
-## Running the API with Docker
+## Running locally with Docker Compose
 
-The Docker image contains the inference API and model artifacts. Training code and data remain outside the runtime image.
+MLflow stores experiment data and model artifacts in the `data/mlflow/` directory. This directory is persistent but is not committed to Git.
 
-### Building the image
+### First Setup
 
-To build the image, run from the root of the repo:
-
-```bash
-docker build -t music-genre-identifier .
-```
-
-### Running the container
-
-To run it, use the following:
+Install the extended dependency set before running the training scripts in `src/`:
 
 ```bash
-docker run --rm -p 8080:8080 music-genre-identifier:latest
+pip install -r requirements-training.txt
 ```
+
+Start the MLflow tracking server for the models and artifacts.
 
 ```bash
-curl -X POST http://localhost:8080/predict-audio \
-  -F "file=@path/to/audio.wav"
+docker compose up -d mlflow
+```
+Then train and register the models. The script selects the *champion* using the highest F1 score.
+
+```bash
+MLFLOW_TRACKING_URI=http://localhost:5000 python src/model_selection.py
 ```
 
-Example response:
+Build and start the FastAPI service.
 
-```json
-{
-  "predicted_genre": "hiphop",
-  "model_name": "Metal",
-  "model_used": "XGBoost",
-  "model_version": "1.0"
-}
+```bash
+docker compose up -d --build api
+```
+
+The services are available by default at:
+
+- MLflow: http://localhost:5000
+- FastAPI: http://localhost:8080
+- FastAPI documentation: http://localhost:8080/docs
+
+After the first setup, you can start the services with:
+
+```bash
+docker compose up -d
 ```
 
 ## Tests
@@ -102,27 +125,21 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-## Training dependencies
-
-The API environment does not include the data and plotting packages used during training. Install the extended dependency set before running the scripts in `src/`:
-
-```bash
-pip install -r requirements-training.txt
-```
-
 ## Project structure
 
 ```text
 app/             FastAPI service and inference code
-configs/         Preprocessing and model-search configuration
-model/           Trained model, label encoder, and metadata
-src/             Data processing, training, and metadata scripts
-processed_data/  Extracted features and dataset splits
+configs/         Preprocessing configuration
+model/           Label encoder used during training
+src/             Data processing and MLflow training
+processed_data/  Extracted features used during training
 tests/           Unit and API tests
-Dockerfile       Container image definition for the inference API
+Dockerfile       Container image definition for FastAPI
 .dockerignore    Files excluded from the Docker build context
+compose.yaml     Docker Compose definition for MLflow and FastAPI
 ```
 
 ## Limitations
 
-The classifier was trained on GTZAN and inherits the limitations of that dataset. It predicts one genre per clip, does not return calibrated confidence scores, and currently accepts only WAV input close to 30 seconds long.
+The API accepts WAV files only. For audio longer than 30 seconds, predictions
+are averaged across up to ten 30-second chunks.

@@ -59,11 +59,12 @@ def feature_extraction(audio_file, metadata):
     n_mfcc = preprocessing["n_mfcc"]
 
     # Load the audio file
-    y, sr = librosa.load(audio_file,
-                         sr=sample_rate,
-                         mono=mono,
-                         duration=duration
-                         )
+    y, sr = librosa.load(
+        audio_file,
+        sr=sample_rate,
+        mono=mono,
+        duration=duration
+    )
 
     # Standardize the signal
     y = standardize_signal(y, sample_rate, duration, normalization)
@@ -72,8 +73,9 @@ def feature_extraction(audio_file, metadata):
     features = extract_audio_features(y, sr, n_mfcc)
 
     # Standardize
-    feature_values = [features[feature]
-                      for feature in metadata['preprocessing']['features']]
+    feature_values = [
+        features[feature] for feature in metadata['preprocessing']['features']
+    ]
     feature_array = np.array(feature_values).reshape(1, -1)
 
     return feature_array
