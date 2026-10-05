@@ -31,5 +31,5 @@ docker compose build api
 docker compose up -d --no-deps api
 
 curl --fail --silent --show-error \
-    --retry 10 --retry-delay 3 --retry-connrefused \
+    --retry 10 --retry-delay 3 --retry-all-errors \
     --max-time 10 http://127.0.0.1:8080/ready
