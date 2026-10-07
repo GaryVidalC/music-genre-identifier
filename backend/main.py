@@ -2,8 +2,8 @@ import fastapi
 import numpy as np
 from fastapi import HTTPException
 from contextlib import asynccontextmanager
-from app.model_loader import load_model_resources
-from app.inference import predict_all_audio
+from backend.model_loader import load_model_resources
+from backend.inference import predict_all_audio
 import soundfile as sf
 
 # Define lifespan for the app

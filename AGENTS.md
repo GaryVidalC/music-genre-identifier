@@ -15,9 +15,12 @@ This Python project identifies music genres from 30-second audio clips. It train
 ## Project structure
 
 - `src/`: data processing, feature extraction, training, and model registration
-- `app/`: FastAPI application, audio processing, and MLflow model loading
+- `backend/`: FastAPI application, audio processing, MLflow model loading, production dependencies, and Docker build files
+- `frontend/`: empty local placeholder for the future React interface; Git does not track empty directories
 - `configs/`: training and preprocessing configuration
 - `tests/`: pytest test suite
+- `scripts/`: homeserver deployment
+- `compose.yaml`: service orchestration from the repository root
 
 # Agent role
 

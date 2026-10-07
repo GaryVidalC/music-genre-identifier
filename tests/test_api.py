@@ -9,7 +9,7 @@ from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from sklearn.preprocessing import LabelEncoder
 
-from app import main
+from backend import main
 
 
 TEST_METADATA = {

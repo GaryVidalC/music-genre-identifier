@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
   api:
     build:
-      context: .
+      context: ./backend
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_MODEL_NAME: music-genre-classifier
@@ -35,4 +35,4 @@ services:
     profiles: ["public"]
     depends_on:
       - api
-    restart: unless-stopped  
+    restart: unless-stopped

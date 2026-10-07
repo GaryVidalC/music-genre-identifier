@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import model_loader
+from backend import model_loader
 
 
 CUSTOM_METADATA = {

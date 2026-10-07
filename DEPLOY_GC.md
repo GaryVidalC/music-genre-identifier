@@ -6,6 +6,10 @@ como referencia para cualquier agente que trabaje en el repositorio.
 
 Estado comprobado el 29 de septiembre de 2026.
 
+Referencia histórica: el despliegue actual usa el homeserver y el workflow de
+Cloud Run está desactivado en GitHub. Las rutas de build de esta guía se adaptaron
+a la estructura actual de `backend/`; esto no reactiva ni actualiza Google Cloud.
+
 ## Resumen rápido
 
 La API corre en Cloud Run. Las imágenes Docker se almacenan en Artifact
@@ -358,9 +362,10 @@ atender requests simultáneos.
 
 ## Imágenes y política de limpieza
 
-La imagen actual ocupa aproximadamente 220 MB comprimidos. El Dockerfile copia
-solo `app/`, `model/` y las dependencias de producción. No incluye el dataset ni
-el código de entrenamiento.
+La imagen del despliegue histórico ocupaba aproximadamente 220 MB comprimidos.
+En la estructura actual, `backend/Dockerfile` construye desde `backend/` y copia
+el código de la API y sus dependencias. No incluye modelos locales, el dataset
+ni el código de entrenamiento; los modelos se cargan desde MLflow.
 
 El archivo `artifact-cleanup-policy.json` define dos reglas:
 
@@ -428,7 +433,7 @@ El CD es la vía normal. Estos pasos sirven si GitHub Actions no está disponibl
 gcloud auth configure-docker southamerica-west1-docker.pkg.dev
 
 docker build \
-  -t southamerica-west1-docker.pkg.dev/gen-lang-client-0620673955/music-genre-identifier/music-genre-identifier:manual .
+  -t southamerica-west1-docker.pkg.dev/gen-lang-client-0620673955/music-genre-identifier/music-genre-identifier:manual ./backend
 
 docker push \
   southamerica-west1-docker.pkg.dev/gen-lang-client-0620673955/music-genre-identifier/music-genre-identifier:manual
@@ -545,8 +550,8 @@ facturación y los límites configurados.
 
 Antes de modificar el despliegue:
 
-1. Leer `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`, `Dockerfile`
-   y `artifact-cleanup-policy.json`.
+1. Leer `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`,
+   `backend/Dockerfile` y `artifact-cleanup-policy.json`.
 2. Tratar el estado de Google Cloud como estado externo que puede diferir del
    repositorio. Usar comandos `describe` antes de asumir valores.
 3. Mantener la relación entre el tag construido y la imagen desplegada.

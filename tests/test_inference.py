@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from app import inference
+from backend import inference
 
 
 def make_wav(duration: float, sample_rate: int = 1000) -> io.BytesIO:

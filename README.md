@@ -17,6 +17,10 @@ FastAPI loads
 model in memory for inference. MLflow persists runs, registry data, and model
 artifacts in `data/mlflow/`. MLflow is not exposed through the public tunnel.
 
+The API code, production dependencies, and Docker build files live in
+`backend/`. Compose builds the API using that directory as its context.
+Training remains separate in `src/`.
+
 ```text
 Client -> Cloudflare -> cloudflared -> FastAPI -> model in memory
                                          |
@@ -167,19 +171,34 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
+Run lint from the repository root with:
+
+```bash
+python -m flake8 backend src tests
+```
+
 ## Project structure
 
 ```text
-app/             FastAPI service and inference code
+backend/         FastAPI code, Dockerfile, .dockerignore, and requirements.txt
+frontend/        Empty placeholder for the future React interface
 configs/         Preprocessing configuration
 model/           Label encoder used during training
 src/             Data processing and MLflow training
 processed_data/  Extracted features used during training
 tests/           Unit and API tests
-Dockerfile       Container image definition for FastAPI
-.dockerignore    Files excluded from the Docker build context
+scripts/         Homeserver deployment script
+requirements-dev.txt       Development dependencies, including backend requirements
+requirements-training.txt  Training dependencies, including backend requirements
 compose.yaml     MLflow, FastAPI, and optional Cloudflare Tunnel services
 ```
+
+Install only the API dependencies with `pip install -r backend/requirements.txt`.
+The development and training requirements include that same file; package
+versions are unchanged.
+
+`frontend/` is intentionally empty locally. Git does not track empty directories,
+so it will not appear in a fresh clone until frontend files are added.
 
 ## Limitations
 

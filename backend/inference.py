@@ -1,6 +1,6 @@
 import soundfile as sf
 from fastapi import HTTPException
-from app.audio_processing import feature_extraction
+from backend.audio_processing import feature_extraction
 from io import BytesIO
 
 
