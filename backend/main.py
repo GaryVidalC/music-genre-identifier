@@ -1,9 +1,12 @@
 import fastapi
 import numpy as np
 from fastapi import HTTPException
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from contextlib import asynccontextmanager
 from backend.model_loader import load_model_resources
 from backend.inference import predict_all_audio
+from backend.audio_processing import youtube_downloader
 import soundfile as sf
 
 # Define lifespan for the app
@@ -98,16 +101,16 @@ def validate_wav(file: fastapi.UploadFile):
         # Reset the file pointer to the beginning after reading
         file.file.seek(0)
 
-    if audio_format != 'WAV':
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid audio format. Please upload a .wav file.",
-        )
+    # if audio_format != 'WAV':
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="Invalid audio format. Please upload a .wav file.",
+    #     )
 
     if sample_rate <= 0 or frames <= 0 or channels <= 0:
         raise HTTPException(
             status_code=400,
-            detail="Invalid audio file. Please upload a valid .wav file.",
+            detail="Invalid audio file. Please upload a non empty .wav file.",
         )
 
 
@@ -151,3 +154,30 @@ def predict_audio(
         "predicted_genre": predicted_genre[0],
         "probabilities": probabilities_dict,
     }
+
+
+@app.post("/predict-youtube")
+def predict_youtube(
+    request: fastapi.Request,
+    url: str = fastapi.Query(...),
+) -> dict:
+    """Download url in isolation and return request's model prediction."""
+    try:
+        with TemporaryDirectory(prefix="music-genre-") as temp_dir:
+            audio_path = Path(youtube_downloader(url, temp_dir))
+            with audio_path.open("rb") as audio:
+                uploaded_file = fastapi.UploadFile(
+                    file=audio,
+                    filename=audio_path.name,
+                    size=audio_path.stat().st_size,
+                )
+
+                return predict_audio(request=request, file=uploaded_file)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing the YouTube audio: {str(e)}",
+        ) from e
+    

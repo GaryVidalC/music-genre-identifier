@@ -69,16 +69,7 @@ def predict_all_audio(model, metadata, audio, n_max_chunks=10):
 
                 chunk_file.seek(0)
                 # Extract features and predict probabilities for the chunk.
-                try:
-                    features = feature_extraction(chunk_file, metadata)
-                except Exception as e:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            "Error during feature extraction for chunk "
-                            f"{i + 1}: {str(e)}"
-                        ),
-                    )
+                features = feature_extraction(chunk_file, metadata)
             probabilities = predict_probabilities(model, features)
             chunk_probabilities.append(probabilities)
 

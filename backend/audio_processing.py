@@ -1,6 +1,7 @@
 import numpy as np
 import librosa
-
+import yt_dlp
+from pathlib import Path
 
 def standardize_signal(signal, sample_rate, duration, normalize):
     objective_samples = sample_rate * duration
@@ -79,3 +80,20 @@ def feature_extraction(audio_file, metadata):
     feature_array = np.array(feature_values).reshape(1, -1)
 
     return feature_array
+
+
+def youtube_downloader(URL: str, output_dir: str) -> str:
+    """Download URL into output_dir; return the converted MP3's path."""
+    ydl_opts = {
+        'format': 'mp3/bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+        }],
+        'outtmpl': str(Path(output_dir) / '%(id)s.%(ext)s'),
+        "keepvideo": False,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info_dict = ydl.extract_info(URL, download=True)
+        return info_dict["requested_downloads"][0]["filepath"]

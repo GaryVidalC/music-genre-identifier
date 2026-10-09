@@ -1,5 +1,6 @@
 import io
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import Mock
 
 import numpy as np
@@ -91,6 +92,56 @@ def test_predict_audio(
         },
     }
     prediction_mock.assert_called_once()
+
+
+def test_predict_youtube_cleans_temporary_files(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use client and monkeypatch to verify isolation and error cleanup."""
+    directories = []
+    opened_files = []
+
+    for failure, status in (
+        ("none", 200),
+        ("download", 500),
+        ("http", 413),
+        ("prediction", 500),
+    ):
+        def download(url: str, output_dir: str) -> str:
+            """Write url's files in output_dir; return the MP3 or fail."""
+            directory = Path(output_dir)
+            directories.append(directory)
+            (directory / "track.part").write_bytes(b"partial download")
+            if failure == "download":
+                raise RuntimeError("Download failed")
+            audio_path = directory / "track.mp3"
+            audio_path.write_bytes(b"audio")
+            return str(audio_path)
+
+        def predict(request: main.fastapi.Request, file: UploadFile) -> dict:
+            """Read file; return a fake prediction or the selected error."""
+            opened_files.append(file.file)
+            assert file.file.read() == b"audio"
+            assert file.size == 5
+            if failure == "http":
+                raise HTTPException(413, "Audio too large")
+            if failure == "prediction":
+                raise RuntimeError("Prediction failed")
+            return {"predicted_genre": "rock", "probabilities": {"rock": 1.0}}
+
+        monkeypatch.setattr(main, "youtube_downloader", download)
+        monkeypatch.setattr(main, "predict_audio", predict)
+        response = client.post("/predict-youtube", params={"url": "mock-url"})
+        assert response.status_code == status
+        if failure == "none":
+            assert response.json()["predicted_genre"] == "rock"
+        elif failure == "http":
+            assert response.json()["detail"] == "Audio too large"
+        assert not directories[-1].exists()
+        assert all(file.closed for file in opened_files)
+
+    assert len(set(directories)) == len(directories)
 
 
 def test_predict_audio_rejects_invalid_uploads(client: TestClient) -> None:
