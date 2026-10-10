@@ -21,6 +21,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
+from src.export_model import export_model
+
 RANDOM_STATE = 42
 TARGET_COLUMN = "genre"
 MODELS = ["SVC", "RandomForest", "XGBClassifier"]
@@ -240,7 +242,7 @@ def log_best_model(
 
 
 def main() -> None:
-    """Optimize, train, evaluate, and register each model family."""
+    """Train and register each family, then select and export the champion."""
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
 
@@ -341,6 +343,17 @@ def main() -> None:
         alias="champion",
         version=max_model_version,
     )
+    print(
+        f"Champion model set to: {max_model_name} "
+        f"(Version: {max_model_version})"
+    )
+    exported_path = export_model(
+        output_dir=project_root / "model" / "exported",
+        tracking_uri=tracking_uri,
+        model_name=REGISTERED_MODEL_NAME,
+        alias="champion",
+    )
+    print(f"Model exported to: {exported_path}")
 
 
 if __name__ == "__main__":

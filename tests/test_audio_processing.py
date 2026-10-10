@@ -1,12 +1,33 @@
 import numpy as np
 import math
+import pytest
 import soundfile as sf
 from io import BytesIO
-from app.audio_processing import (
+from fastapi import HTTPException
+from backend.audio_processing import (
+    check_download_size,
     extract_audio_features,
     feature_extraction,
     standardize_signal,
 )
+
+
+def test_download_size_limit() -> None:
+    """Accept the size boundary and reject known or downloaded excess bytes."""
+    limit = 100 * 1024 * 1024
+    check_download_size({
+        "status": "downloading",
+        "downloaded_bytes": limit,
+        "total_bytes": limit,
+    }, limit)
+
+    for sizes in (
+        {"downloaded_bytes": limit + 1},
+        {"downloaded_bytes": 1, "total_bytes": limit + 1},
+    ):
+        with pytest.raises(HTTPException) as error:
+            check_download_size({"status": "downloading", **sizes}, limit)
+        assert error.value.status_code == 413
 
 
 def test_standardize_signal():
@@ -220,7 +241,10 @@ def test_feature_extraction():
     assert np.all(np.isfinite(results))  # Ensure all features are finite
 
 
-def test_resampling_and_mono_conversion(monkeypatch):
+def test_resampling_and_mono_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify mono resampling using monkeypatch to capture extracted audio."""
     # Create a stereo signal with a different sample rate
     sr_original = 44100
     duration = 1
@@ -270,7 +294,9 @@ def test_resampling_and_mono_conversion(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "app.audio_processing.extract_audio_features", capture_audio)
+        "backend.audio_processing.extract_audio_features",
+        capture_audio,
+    )
 
     results = feature_extraction(wav, metadata)
 
@@ -283,7 +309,10 @@ def test_resampling_and_mono_conversion(monkeypatch):
     assert received_audio["n_mfcc"] == 12
 
 
-def test_feature_extraction_feature_order(monkeypatch):
+def test_feature_extraction_feature_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify feature order with known values provided via monkeypatch."""
     # Create a simple sine wave signal
     sr = 22050
     duration = 1
@@ -315,7 +344,7 @@ def test_feature_extraction_feature_order(monkeypatch):
         return extracted_features
 
     monkeypatch.setattr(
-        "app.audio_processing.extract_audio_features",
+        "backend.audio_processing.extract_audio_features",
         return_known_features,
     )
 

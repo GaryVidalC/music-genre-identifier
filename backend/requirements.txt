@@ -11,3 +11,4 @@ skops==0.16.0
 pandas==3.0.0
 pyarrow==23.0.1
 scipy==1.17.0
+yt-dlp==2026.8.19

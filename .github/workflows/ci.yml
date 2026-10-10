@@ -18,12 +18,27 @@ jobs:
                   pip install -r requirements-dev.txt
             - name: Lint code
               run: |
-                  python -m flake8 app tests
-                  python -m flake8 src tests
+                  python -m flake8 backend src tests
             - name: Run tests
               run: |
                   python -m pytest -q
+            - name: Set up Node 24
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: npm
+                  cache-dependency-path: frontend/package-lock.json
+            - name: Test and build frontend
+              working-directory: frontend
+              run: |
+                  npm ci
+                  npm test
+                  npm run build
+            - name: Verify exported model is included
+              run: |
+                  test -f model/exported/metadata.json
+                  test -f model/exported/model/MLmodel
             - name: Validate Docker Compose
               run: docker compose config --quiet
             - name: Docker build
-              run: docker compose build api
+              run: docker compose build api frontend

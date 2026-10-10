@@ -1,5 +1,6 @@
 services:
   mlflow:
+    profiles: ["training"]
     image: ghcr.io/mlflow/mlflow:v3.16.1
     command:
       - mlflow
@@ -18,14 +19,16 @@ services:
   api:
     build:
       context: .
-    environment:
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_MODEL_NAME: music-genre-classifier
-      MLFLOW_MODEL_ALIAS: champion
-    depends_on:
-      - mlflow
+      dockerfile: ./backend/Dockerfile
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8081:80"
+    depends_on:
+      - api
     restart: unless-stopped
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -34,5 +37,5 @@ services:
       TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN:-}"
     profiles: ["public"]
     depends_on:
-      - api
-    restart: unless-stopped  
+      - frontend
+    restart: unless-stopped

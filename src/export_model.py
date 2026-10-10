@@ -1,15 +1,14 @@
-import os
+import json
+import shutil
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import mlflow
-import numpy as np
 from mlflow import MlflowClient
-from mlflow import sklearn as mlflow_sklearn
-from mlflow import xgboost as mlflow_xgboost
-from sklearn.preprocessing import LabelEncoder
+from mlflow.entities import Run
+from mlflow.entities.model_registry import ModelVersion
 
-DEFAULT_TRACKING_URI = "http://localhost:5000"
-DEFAULT_MODEL_NAME = "music-genre-classifier"
-DEFAULT_MODEL_ALIAS = "champion"
+
 REQUIRED_METADATA_FIELDS = {
     "preprocessing",
     "genre_classes",
@@ -19,23 +18,13 @@ REQUIRED_METADATA_FIELDS = {
 }
 
 
-def _load_native_model(model_uri, flavors):
-    """Load a registered model with its native MLflow flavor."""
-    if "sklearn" in flavors:
-        return mlflow_sklearn.load_model(model_uri)
-
-    if "xgboost" in flavors:
-        return mlflow_xgboost.load_model(model_uri)
-
-    supported_flavors = ", ".join(sorted(flavors))
-    raise ValueError(
-        "Unsupported MLflow model flavor. "
-        f"Available flavors: {supported_flavors}"
-    )
-
-
-def _build_metadata(custom_metadata, model_version, run, model_alias):
-    """Convert MLflow model and run data into the FastAPI metadata contract."""
+def _build_metadata(
+    custom_metadata: dict,
+    model_version: ModelVersion,
+    run: Run,
+    model_alias: str,
+) -> dict:
+    """Convert model metadata, version, run and alias to API metadata."""
     missing_fields = REQUIRED_METADATA_FIELDS - custom_metadata.keys()
     if missing_fields:
         missing = ", ".join(sorted(missing_fields))
@@ -80,34 +69,52 @@ def _build_metadata(custom_metadata, model_version, run, model_alias):
     }
 
 
-def load_model_resources():
-    """Load a pinned MLflow model, its metadata, and its label encoder."""
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI)
-    model_name = os.getenv("MLFLOW_MODEL_NAME", DEFAULT_MODEL_NAME)
-    model_alias = os.getenv("MLFLOW_MODEL_ALIAS", DEFAULT_MODEL_ALIAS)
-
+def export_model(
+    output_dir: Path,
+    tracking_uri: str = "http://localhost:5000",
+    model_name: str = "music-genre-classifier",
+    alias: str = "champion",
+) -> Path:
+    """Export name/alias from tracking_uri to output_dir; return its path."""
     mlflow.set_tracking_uri(tracking_uri)
     client = MlflowClient(tracking_uri=tracking_uri)
-    model_version = client.get_model_version_by_alias(
-        model_name,
-        model_alias,
-    )
 
-    model_uri = f"models:/{model_name}/{model_version.version}"
+    version = client.get_model_version_by_alias(
+        name=model_name,
+        alias=alias
+    )
+    model_uri = f"models:/{model_name}/{version.version}"
+
     model_info = mlflow.models.get_model_info(model_uri)
-    run = client.get_run(model_version.run_id)
+    run = client.get_run(model_info.run_id)
 
     metadata = _build_metadata(
         model_info.metadata or {},
-        model_version,
+        version,
         run,
-        model_alias,
-    )
-    model = _load_native_model(model_uri, model_info.flavors)
-
-    encoder = LabelEncoder()
-    encoder.classes_ = np.asarray(
-        metadata["data_info"]["genre_classes"],
+        alias,
     )
 
-    return model, encoder, metadata
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with TemporaryDirectory() as temp_dir:
+        downloaded_path = mlflow.artifacts.download_artifacts(
+            artifact_uri=model_uri,
+            dst_path=temp_dir
+        )
+        shutil.copytree(
+            downloaded_path,
+            output_dir / "model",
+            dirs_exist_ok=True
+        )
+
+    with (output_dir / "metadata.json").open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+    return output_dir
+
+
+if __name__ == "__main__":
+    project_root = Path(__file__).resolve().parent.parent
+    exported_path = export_model(project_root / "model" / "exported")
+    print(f"Model exported to: {exported_path}")

@@ -1,5 +1,8 @@
 import numpy as np
 import librosa
+import yt_dlp
+from pathlib import Path
+from fastapi import HTTPException
 
 
 def standardize_signal(signal, sample_rate, duration, normalize):
@@ -79,3 +82,41 @@ def feature_extraction(audio_file, metadata):
     feature_array = np.array(feature_values).reshape(1, -1)
 
     return feature_array
+
+
+def check_download_size(progress: dict, max_audio_size: int) -> None:
+    """Check progress against max_audio_size; raise HTTP 413 if exceeded."""
+    if progress.get("status") not in {"downloading", "finished"}:
+        return
+
+    downloaded = progress.get("downloaded_bytes") or 0
+    total = progress.get("total_bytes") or 0
+    if max(downloaded, total) > max_audio_size:
+        raise HTTPException(
+            status_code=413,
+            detail="Audio download exceeds the 100 MiB limit.",
+        )
+
+
+def youtube_downloader(
+    URL: str,
+    output_dir: str,
+    max_audio_size: int,
+) -> str:
+    """Download URL into output_dir; return the converted MP3's path."""
+    ydl_opts = {
+        'format': 'mp3/bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+        }],
+        'outtmpl': str(Path(output_dir) / '%(id)s.%(ext)s'),
+        "keepvideo": False,
+        "noplaylist": True,
+        "progress_hooks": [
+            lambda progress: check_download_size(progress, max_audio_size)],
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info_dict = ydl.extract_info(URL, download=True)
+        return info_dict["requested_downloads"][0]["filepath"]

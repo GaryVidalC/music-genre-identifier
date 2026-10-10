@@ -1,5 +1,7 @@
 import io
 from collections.abc import Iterator
+from pathlib import Path
+from typing import BinaryIO
 from unittest.mock import Mock
 
 import numpy as np
@@ -8,8 +10,9 @@ import soundfile as sf
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from sklearn.preprocessing import LabelEncoder
+from yt_dlp.utils import DownloadError
 
-from app import main
+from backend import main
 
 
 TEST_METADATA = {
@@ -93,8 +96,93 @@ def test_predict_audio(
     prediction_mock.assert_called_once()
 
 
+def test_predictions_reject_busy_slot(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    prediction_mock: Mock,
+) -> None:
+    """Verify both endpoints reject an occupied slot using mocked resources."""
+    download = Mock()
+    monkeypatch.setattr(main, "youtube_downloader", download)
+    assert main.prediction_slot.acquire(blocking=False)
+    try:
+        response = client.post(
+            "/predict-audio",
+            files={"file": ("test.wav", make_wav(), "audio/wav")},
+        )
+        assert response.status_code == 429
+        response = client.post(
+            "/predict-youtube", params={"url": "https://youtu.be/abcdefghijk"},
+        )
+        assert response.status_code == 429
+        prediction_mock.assert_not_called()
+        download.assert_not_called()
+        assert not main.prediction_slot.acquire(blocking=False)
+    finally:
+        main.prediction_slot.release()
+
+
+def test_predict_youtube_cleans_temporary_files(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use client and monkeypatch to verify isolation and error cleanup."""
+    directories = []
+    opened_files = []
+
+    for failure, status in (
+        ("none", 200),
+        ("download", 502),
+        ("http", 413),
+        ("prediction", 500),
+    ):
+        def download(url: str, output_dir: str, max_audio_size: int) -> str:
+            """Write url's files in output_dir; return the MP3 or fail."""
+            directory = Path(output_dir)
+            directories.append(directory)
+            (directory / "track.part").write_bytes(b"partial download")
+            if failure == "download":
+                raise DownloadError("Download failed: private details")
+            audio_path = directory / "track.mp3"
+            audio_path.write_bytes(b"audio")
+            return str(audio_path)
+
+        def predict(
+            request: main.fastapi.Request, audio: BinaryIO, size: int,
+        ) -> dict:
+            """Read audio and size; return a prediction or selected error."""
+            opened_files.append(audio)
+            assert audio.read() == b"audio"
+            assert size == 5
+            if failure == "http":
+                raise HTTPException(413, "Audio too large")
+            if failure == "prediction":
+                raise RuntimeError("Prediction failed")
+            return {"predicted_genre": "rock", "probabilities": {"rock": 1.0}}
+
+        monkeypatch.setattr(main, "youtube_downloader", download)
+        monkeypatch.setattr(main, "predict_file", predict)
+        response = client.post(
+            "/predict-youtube", params={"url": "https://youtu.be/abcdefghijk"},
+        )
+        assert response.status_code == status
+        if failure == "none":
+            assert response.json()["predicted_genre"] == "rock"
+        elif failure == "http":
+            assert response.json()["detail"] == "Audio too large"
+        else:
+            assert "private details" not in response.json()["detail"]
+            assert "Prediction failed" not in response.json()["detail"]
+        assert not directories[-1].exists()
+        assert all(file.closed for file in opened_files)
+        assert main.prediction_slot.acquire(blocking=False)
+        main.prediction_slot.release()
+
+    assert len(set(directories)) == len(directories)
+
+
 def test_predict_audio_rejects_invalid_uploads(client: TestClient) -> None:
-    """Reject corrupt audio, non-WAV formats, and missing files."""
+    """Reject corrupt or missing audio; preserve decodable FLAC support."""
     corrupt = {"file": (
         "corrupt.wav",
         io.BytesIO(b"not a WAV file"),
@@ -107,7 +195,7 @@ def test_predict_audio_rejects_invalid_uploads(client: TestClient) -> None:
     )}
 
     assert client.post("/predict-audio", files=corrupt).status_code == 400
-    assert client.post("/predict-audio", files=flac).status_code == 400
+    assert client.post("/predict-audio", files=flac).status_code == 200
     assert client.post("/predict-audio", files={}).status_code == 422
 
 
@@ -120,6 +208,6 @@ def test_predict_audio_rejects_large_file() -> None:
     )
 
     with pytest.raises(HTTPException) as error:
-        main.validate_wav(upload)
+        main.validate_wav(upload.file, upload.size)
 
     assert error.value.status_code == 413

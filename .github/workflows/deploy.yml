@@ -47,6 +47,7 @@ jobs:
               uses: docker/build-push-action@v7
               with:
                 context: .
+                file: backend/Dockerfile
                 push: true
                 tags: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPOSITORY }}/${{vars.CLOUD_RUN_SERVICE}}:${{ github.event.workflow_run.head_sha }}
             - name: Deploy to Cloud Run
@@ -61,5 +62,3 @@ jobs:
               run: |
                 curl --fail --show-error --silent --retry 5 --retry-delay 5 "${{ steps.deploy.outputs.url }}/health"
 
-
-            
