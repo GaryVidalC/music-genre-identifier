@@ -79,13 +79,17 @@ The model processes audio in 30-second segments. For longer audio, it averages t
 
 FastAPI also exposes interactive documentation at `http://localhost:8080/docs`.
 
-### Existing public API
+### Live application
 
-This project is being hosted in an old laptop, with only 4GB of ram.
+Hosted on a Debian homeserver with 4 GB of RAM. Cloudflare Tunnel routes
+`music-genre-identifier.gvidal.cl` to `http://frontend:80`. Nginx serves the
+interface and forwards `/api/` to FastAPI. MLflow stays stopped during inference.
 
-- [Interactive docs](https://api.gvidal.cl/docs)
-- [Model information](https://api.gvidal.cl/model-info)
-- Base URL: `https://api.gvidal.cl`
+- [Try the application](https://music-genre-identifier.gvidal.cl)
+- [Model information](https://music-genre-identifier.gvidal.cl/api/model-info)
+
+WAV uploads and YouTube predictions have been verified through the public
+frontend. The previous `api.gvidal.cl` route is no longer needed.
 
 The JSON response contains `predicted_genre`, the class with the highest
 probability, and `probabilities`, a mapping from each genre to a value between
@@ -159,7 +163,8 @@ sudo install -m 0755 -o root -g root \
   by blocks and can exceed the limit by a block before being aborted.
 - YouTube playlists are not supported. The full audio is downloaded, but only
   up to ten 30-second chunks are analyzed.
-- WAV and YouTube share one processing slot per API process; overlapping
-  requests receive HTTP `429`. Keep a single API worker.
+- The API uses a single worker to reduce RAM usage on the 4 GB homeserver.
+  WAV and YouTube share one processing slot; overlapping requests receive
+  HTTP `429` to avoid simultaneous downloads and inference.
 - Oversized audio returns `413`, download failures `502`, and internal YouTube
   processing errors `500` without exposing technical details.
