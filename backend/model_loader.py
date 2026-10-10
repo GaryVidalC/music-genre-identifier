@@ -1,31 +1,25 @@
-import os
+import json
+from pathlib import Path
+from typing import Any
 
-import mlflow
 import numpy as np
-from mlflow import MlflowClient
+from mlflow.models import Model
 from mlflow import sklearn as mlflow_sklearn
 from mlflow import xgboost as mlflow_xgboost
 from sklearn.preprocessing import LabelEncoder
 
-DEFAULT_TRACKING_URI = "http://localhost:5000"
-DEFAULT_MODEL_NAME = "music-genre-classifier"
-DEFAULT_MODEL_ALIAS = "champion"
-REQUIRED_METADATA_FIELDS = {
-    "preprocessing",
-    "genre_classes",
-    "feature_names",
-    "number_of_samples",
-    "number_of_features",
-}
+DEFAULT_MODEL_DIR = (
+    Path(__file__).resolve().parent.parent / "model" / "exported"
+)
 
 
-def _load_native_model(model_uri, flavors):
-    """Load a registered model with its native MLflow flavor."""
+def _load_native_model(model_path: str, flavors: dict) -> Any:
+    """Load model_path using the native sklearn or XGBoost flavor."""
     if "sklearn" in flavors:
-        return mlflow_sklearn.load_model(model_uri)
+        return mlflow_sklearn.load_model(model_path)
 
     if "xgboost" in flavors:
-        return mlflow_xgboost.load_model(model_uri)
+        return mlflow_xgboost.load_model(model_path)
 
     supported_flavors = ", ".join(sorted(flavors))
     raise ValueError(
@@ -34,80 +28,32 @@ def _load_native_model(model_uri, flavors):
     )
 
 
-def _build_metadata(custom_metadata, model_version, run, model_alias):
-    """Convert MLflow model and run data into the FastAPI metadata contract."""
-    missing_fields = REQUIRED_METADATA_FIELDS - custom_metadata.keys()
+def load_model_resources() -> tuple[Any, LabelEncoder, dict]:
+    """Load the local export; return model, encoder and API metadata."""
+    with (DEFAULT_MODEL_DIR / "metadata.json").open(
+        "r", encoding="utf-8",
+    ) as file:
+        metadata = json.load(file)
+
+    required_fields = {
+        "data_info", "preprocessing", "model", "model_stats", "model_params",
+    }
+    missing_fields = required_fields - metadata.keys()
     if missing_fields:
         missing = ", ".join(sorted(missing_fields))
-        raise ValueError(f"MLflow model metadata is missing: {missing}")
+        raise ValueError(f"Exported model metadata is missing: {missing}")
 
-    preprocessing = custom_metadata["preprocessing"]
-    feature_names = custom_metadata["feature_names"]
-    genre_classes = custom_metadata["genre_classes"]
-
-    if not isinstance(preprocessing, dict):
-        raise ValueError("MLflow preprocessing metadata must be a dictionary")
-    if not feature_names:
-        raise ValueError("MLflow model metadata contains no feature names")
+    genre_classes = metadata["data_info"].get("genre_classes")
     if not genre_classes:
-        raise ValueError("MLflow model metadata contains no genre classes")
+        raise ValueError("Exported model metadata contains no genre classes")
+    if not metadata["preprocessing"].get("features"):
+        raise ValueError("Exported model metadata contains no feature names")
 
-    preprocessing = {
-        **preprocessing,
-        "features": list(feature_names),
-    }
-
-    return {
-        "dataset": run.data.tags.get("dataset"),
-        "data_info": {
-            "number_of_samples": custom_metadata["number_of_samples"],
-            "number_of_features": custom_metadata["number_of_features"],
-            "genre_classes": list(genre_classes),
-        },
-        "preprocessing": preprocessing,
-        "model": {
-            "model_name": model_version.name,
-            "model_used": run.data.tags.get(
-                "model_type",
-                model_version.name,
-            ),
-            "version": model_version.version,
-            "alias": model_alias,
-            "run_id": model_version.run_id,
-        },
-        "model_stats": dict(run.data.metrics),
-        "model_params": dict(run.data.params),
-    }
-
-
-def load_model_resources():
-    """Load a pinned MLflow model, its metadata, and its label encoder."""
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI)
-    model_name = os.getenv("MLFLOW_MODEL_NAME", DEFAULT_MODEL_NAME)
-    model_alias = os.getenv("MLFLOW_MODEL_ALIAS", DEFAULT_MODEL_ALIAS)
-
-    mlflow.set_tracking_uri(tracking_uri)
-    client = MlflowClient(tracking_uri=tracking_uri)
-    model_version = client.get_model_version_by_alias(
-        model_name,
-        model_alias,
-    )
-
-    model_uri = f"models:/{model_name}/{model_version.version}"
-    model_info = mlflow.models.get_model_info(model_uri)
-    run = client.get_run(model_version.run_id)
-
-    metadata = _build_metadata(
-        model_info.metadata or {},
-        model_version,
-        run,
-        model_alias,
-    )
-    model = _load_native_model(model_uri, model_info.flavors)
+    model_path = str(DEFAULT_MODEL_DIR / "model")
+    model_config = Model.load(str(Path(model_path) / "MLmodel"))
+    model = _load_native_model(model_path, model_config.flavors)
 
     encoder = LabelEncoder()
-    encoder.classes_ = np.asarray(
-        metadata["data_info"]["genre_classes"],
-    )
+    encoder.classes_ = np.asarray(genre_classes)
 
     return model, encoder, metadata

@@ -109,6 +109,10 @@ test('links to the repo and supports dropping files without changing the upload 
   expect(screen.getByRole('status').textContent).toContain(
     'Processing your audio',
   );
+  expect((screen.getByLabelText('YouTube URL') as HTMLInputElement).disabled)
+    .toBe(true);
+  expect((screen.getByRole('button', { name: 'Analyze YouTube' }) as HTMLButtonElement).disabled)
+    .toBe(true);
   fireEvent.submit(
     screen.getByRole('button', { name: 'Analyzing…' }).closest('form')!,
   );
@@ -142,6 +146,36 @@ test('links to the repo and supports dropping files without changing the upload 
   expect(dropZone.textContent).toContain('next.wav');
   expect(screen.queryByRole('heading', { name: 'rock' })).toBeNull();
   expect(screen.getByText('Your results will appear here.')).toBeTruthy();
+
+  const youtubeInput = screen.getByLabelText('YouTube URL') as HTMLInputElement;
+  const videoUrl = 'https://www.youtube.com/watch?v=I4v4-Mi6qZA&list=test';
+  fireEvent.change(youtubeInput, { target: { value: `  ${videoUrl}  ` } });
+  const youtubeForm = youtubeInput.closest('form')!;
+  fireEvent.submit(youtubeForm);
+  expect(youtubeInput.disabled).toBe(true);
+  expect((dropZone as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Analyzing…' }) as HTMLButtonElement).disabled)
+    .toBe(true);
+  fireEvent.submit(youtubeForm);
+  fireEvent.submit(input.closest('form')!);
+  dropFiles(file);
+  fireEvent.change(youtubeInput, { target: { value: 'https://youtu.be/other' } });
+  expect(youtubeInput.value.trim()).toBe(videoUrl);
+  expect(dropZone.textContent).toContain('next.wav');
+  expect(request).toHaveBeenCalledTimes(2);
+  const [youtubeEndpoint, youtubeOptions] = request.mock.calls[1] as unknown as [
+    string, RequestInit,
+  ];
+  expect(youtubeEndpoint).toBe(
+    `/api/predict-youtube?${new URLSearchParams({ url: videoUrl })}`,
+  );
+  expect(youtubeOptions.method).toBe('POST');
+  expect(youtubeOptions.body).toBeUndefined();
+  await act(async (): Promise<void> => resolveRequest(predictionResponse()));
+  expect(screen.getByRole('heading', { name: 'rock' })).toBeTruthy();
+  expect(screen.getByText('75.0%')).toBeTruthy();
+  fireEvent.change(youtubeInput, { target: { value: 'https://youtu.be/next' } });
+  expect(screen.queryByRole('heading', { name: 'rock' })).toBeNull();
   openPicker.mockRestore();
 });
 
@@ -189,6 +223,20 @@ test('rejects invalid selections and drops before making a request', (): void =>
   ).toBe(false);
   dropFiles();
   expect(screen.getByText('track.WAV')).toBeTruthy();
+
+  const youtubeInput = screen.getByLabelText('YouTube URL');
+  expect((screen.getByRole('button', { name: 'Analyze YouTube' }) as HTMLButtonElement).disabled)
+    .toBe(true);
+  for (const url of ['', 'not a URL', 'ftp://youtube.com/video']) {
+    fireEvent.change(youtubeInput, { target: { value: url } });
+    fireEvent.submit(youtubeInput.closest('form')!);
+    expect(screen.getByRole('alert').textContent).toContain('valid HTTP or HTTPS');
+  }
+  fireEvent.change(youtubeInput, {
+    target: { value: 'https://youtu.be/I4v4-Mi6qZA' },
+  });
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
 });
 
 test('shows API and connection errors, and allows retrying the selected file', async (): Promise<void> => {
@@ -203,6 +251,12 @@ test('shows API and connection errors, and allows retrying the selected file', a
       ),
     )
     .mockResolvedValueOnce(new Response('Service unavailable', { status: 503 }))
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValueOnce(predictionResponse())
+    .mockResolvedValueOnce(new Response(
+      JSON.stringify({ detail: 'Playlist URLs are not supported.' }),
+      { status: 400 },
+    ))
     .mockRejectedValueOnce(new TypeError('Failed to fetch'))
     .mockResolvedValueOnce(predictionResponse());
   vi.stubGlobal('fetch', request);
@@ -239,4 +293,21 @@ test('shows API and connection errors, and allows retrying the selected file', a
   expect(await screen.findByRole('heading', { name: 'rock' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(request).toHaveBeenCalledTimes(4);
+
+  const youtubeInput = screen.getByLabelText('YouTube URL') as HTMLInputElement;
+  const videoUrl = 'https://youtu.be/I4v4-Mi6qZA';
+  fireEvent.change(youtubeInput, { target: { value: videoUrl } });
+  expect(screen.queryByRole('heading', { name: 'rock' })).toBeNull();
+  fireEvent.submit(youtubeInput.closest('form')!);
+  expect((await screen.findByRole('alert')).textContent).toContain('Playlist URLs');
+  expect(youtubeInput.value).toBe(videoUrl);
+  fireEvent.submit(youtubeInput.closest('form')!);
+  await waitFor((): void =>
+    expect(screen.getByRole('alert').textContent).toContain('Could not connect'),
+  );
+  expect(youtubeInput.value).toBe(videoUrl);
+  fireEvent.submit(youtubeInput.closest('form')!);
+  expect(await screen.findByRole('heading', { name: 'rock' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(7);
 });

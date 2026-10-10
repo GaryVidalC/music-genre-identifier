@@ -23,14 +23,14 @@ function validateFile(file: File): string {
   return '';
 }
 
-/** Upload a WAV file; return its prediction or throw a readable request error. */
-async function predictAudio(file: File): Promise<Prediction> {
-  const body = new FormData();
-  body.append('file', file);
-
+/** POST to an endpoint with an optional file body; return prediction or a readable error. */
+async function requestPrediction(
+  endpoint: string,
+  body?: FormData,
+): Promise<Prediction> {
   let response: Response;
   try {
-    response = await fetch('/api/predict-audio', { method: 'POST', body });
+    response = await fetch(endpoint, { method: 'POST', ...(body ? { body } : {}) });
   } catch {
     throw new Error(
       'Could not connect to the API. Check that FastAPI is running and try again.',
@@ -51,9 +51,10 @@ async function predictAudio(file: File): Promise<Prediction> {
   return response.json() as Promise<Prediction>;
 }
 
-/** Render the upload form and prediction results; takes no props and returns the interface. */
+/** Render audio and YouTube forms with shared results; takes no props. */
 export default function App(): ReactElement {
   const [file, setFile] = useState<File | null>(null);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
   const [prediction, setPrediction] = useState<Prediction | null>(null);
   const [error, setError] = useState('');
   const [processing, setProcessing] = useState(false);
@@ -120,18 +121,14 @@ export default function App(): ReactElement {
     selectFile(event.dataTransfer.files[0]);
   }
 
-  /** Handle form submission; upload the selected file and update loading, result, or error state. */
-  async function handleSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ): Promise<void> {
-    event.preventDefault();
-    if (!file || processing) return;
-
+  /** Request prediction for endpoint/body; update shared loading and feedback state. */
+  async function analyze(endpoint: string, body?: FormData): Promise<void> {
+    if (processing) return;
     setProcessing(true);
     setError('');
     setPrediction(null);
     try {
-      setPrediction(await predictAudio(file));
+      setPrediction(await requestPrediction(endpoint, body));
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -141,6 +138,41 @@ export default function App(): ReactElement {
     } finally {
       setProcessing(false);
     }
+  }
+
+  /** Submit the selected WAV from event; await analysis without reloading the page. */
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!file || processing) return;
+    const body = new FormData();
+    body.append('file', file);
+    await analyze('/api/predict-audio', body);
+  }
+
+  /** Read a URL change event; clear old feedback while preserving the selected WAV. */
+  function handleUrlChange(event: ChangeEvent<HTMLInputElement>): void {
+    if (processing) return;
+    setYoutubeUrl(event.target.value);
+    setError('');
+    setPrediction(null);
+  }
+
+  /** Validate event's URL form and submit an encoded query; await shared analysis. */
+  async function handleYoutubeSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    if (processing) return;
+    const url = youtubeUrl.trim();
+    try {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
+    } catch {
+      setPrediction(null);
+      setError('Please enter a valid HTTP or HTTPS YouTube URL.');
+      return;
+    }
+    await analyze(`/api/predict-youtube?${new URLSearchParams({ url })}`);
   }
 
   const probabilities = Object.entries(prediction?.probabilities ?? {}).sort(
@@ -220,19 +252,45 @@ export default function App(): ReactElement {
               >
                 {processing ? 'Analyzing…' : 'Analyze audio'}
               </button>
-
-              {processing && (
-                <p className="feedback muted" role="status">
-                  Processing your audio. Longer tracks may take a little more
-                  time.
-                </p>
-              )}
-              {error && (
-                <p className="feedback error" role="alert">
-                  {error}
-                </p>
-              )}
             </form>
+
+            <form
+              className="youtube-form"
+              onSubmit={handleYoutubeSubmit}
+              aria-busy={processing}
+              noValidate
+            >
+              <label htmlFor="youtube-url">YouTube URL</label>
+              <input
+                id="youtube-url"
+                name="url"
+                type="url"
+                placeholder="https://www.youtube.com/watch?v=…"
+                value={youtubeUrl}
+                onChange={handleUrlChange}
+                disabled={processing}
+                required
+              />
+              <button
+                className="analyze-button"
+                type="submit"
+                disabled={!youtubeUrl.trim() || processing}
+              >
+                Analyze YouTube
+              </button>
+            </form>
+
+            {processing && (
+              <p className="feedback muted" role="status">
+                Processing your audio. Longer tracks may take a little more
+                time.
+              </p>
+            )}
+            {error && (
+              <p className="feedback error" role="alert">
+                {error}
+              </p>
+            )}
 
             <p className="audio-note">
               The model analyzes 30-second segments and averages predictions

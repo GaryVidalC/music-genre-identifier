@@ -230,6 +230,29 @@ h2 {
   color: #a0aab5;
   box-shadow: none;
 }
+.youtube-form {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #30363d;
+}
+.youtube-form label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.youtube-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #526276;
+  border-radius: 5px;
+  background: #1c2128;
+  color: #e6edf3;
+}
+.youtube-form input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .feedback {
   margin-top: 16px;
   font-size: 15px;

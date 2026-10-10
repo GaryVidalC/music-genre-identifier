@@ -1,0 +1,99 @@
+artifact_path: mlflow-artifacts:/1/models/m-c5e9d0f11c9348feb4ed07d27da382dd/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.skops
+    predict_fn: predict
+    python_version: 3.12.3
+  sklearn:
+    code: null
+    pickled_model: model.skops
+    serialization_format: skops
+    sklearn_version: 1.8.0
+    skops_trusted_types: null
+metadata:
+  feature_names:
+  - mean_mfcc_0
+  - mean_mfcc_1
+  - mean_mfcc_2
+  - mean_mfcc_3
+  - mean_mfcc_4
+  - mean_mfcc_5
+  - mean_mfcc_6
+  - mean_mfcc_7
+  - mean_mfcc_8
+  - mean_mfcc_9
+  - mean_mfcc_10
+  - mean_mfcc_11
+  - std_mfcc_0
+  - std_mfcc_1
+  - std_mfcc_2
+  - std_mfcc_3
+  - std_mfcc_4
+  - std_mfcc_5
+  - std_mfcc_6
+  - std_mfcc_7
+  - std_mfcc_8
+  - std_mfcc_9
+  - std_mfcc_10
+  - std_mfcc_11
+  - mean_chroma_0
+  - mean_chroma_1
+  - mean_chroma_2
+  - mean_chroma_3
+  - mean_chroma_4
+  - mean_chroma_5
+  - mean_chroma_6
+  - mean_chroma_7
+  - mean_chroma_8
+  - mean_chroma_9
+  - mean_chroma_10
+  - mean_chroma_11
+  - std_chroma_0
+  - std_chroma_1
+  - std_chroma_2
+  - std_chroma_3
+  - std_chroma_4
+  - std_chroma_5
+  - std_chroma_6
+  - std_chroma_7
+  - std_chroma_8
+  - std_chroma_9
+  - std_chroma_10
+  - std_chroma_11
+  - mean_spectral_centroid
+  - std_spectral_centroid
+  - mean_spectral_bandwidth
+  - std_spectral_bandwidth
+  - mean_spectral_rolloff
+  - std_spectral_rolloff
+  genre_classes:
+  - blues
+  - classical
+  - country
+  - disco
+  - hiphop
+  - jazz
+  - metal
+  - pop
+  - reggae
+  - rock
+  number_of_features: 54
+  number_of_samples: 999
+  preprocessing:
+    data_path: data/genres_original
+    duration: 30
+    mono: true
+    n_mfcc: 12
+    normalization: true
+    sample_rate: 22050
+mlflow_version: 3.16.1
+model_id: m-c5e9d0f11c9348feb4ed07d27da382dd
+model_size_bytes: 417111
+model_uuid: m-c5e9d0f11c9348feb4ed07d27da382dd
+prompts: null
+run_id: 25c2fb21d05a462c93f038dbb265ff07
+utc_time_created: '2026-10-05 00:19:16.604591'

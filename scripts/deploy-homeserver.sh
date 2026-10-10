@@ -27,9 +27,13 @@ fi
 git checkout --no-overwrite-ignore --detach "$commit"
 
 docker compose config --quiet
-docker compose build api
-docker compose up -d --no-deps api
+docker compose build api frontend
+docker compose up -d --no-deps --force-recreate api frontend
 
 curl --fail --silent --show-error \
     --retry 10 --retry-delay 3 --retry-all-errors \
-    --max-time 10 http://127.0.0.1:8080/ready
+    --max-time 10 http://127.0.0.1:8081/api/ready
+
+curl --fail --silent --show-error \
+    --retry 10 --retry-delay 3 --retry-all-errors \
+    --max-time 10 http://127.0.0.1:8081/ > /dev/null

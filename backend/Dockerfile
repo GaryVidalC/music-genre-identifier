@@ -8,11 +8,12 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . ./backend
+COPY backend/ ./backend
+COPY model/exported ./model/exported
 
 EXPOSE 8080
 

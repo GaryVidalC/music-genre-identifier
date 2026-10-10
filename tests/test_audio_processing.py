@@ -3,11 +3,31 @@ import math
 import pytest
 import soundfile as sf
 from io import BytesIO
+from fastapi import HTTPException
 from backend.audio_processing import (
+    check_download_size,
     extract_audio_features,
     feature_extraction,
     standardize_signal,
 )
+
+
+def test_download_size_limit() -> None:
+    """Accept the size boundary and reject known or downloaded excess bytes."""
+    limit = 100 * 1024 * 1024
+    check_download_size({
+        "status": "downloading",
+        "downloaded_bytes": limit,
+        "total_bytes": limit,
+    }, limit)
+
+    for sizes in (
+        {"downloaded_bytes": limit + 1},
+        {"downloaded_bytes": 1, "total_bytes": limit + 1},
+    ):
+        with pytest.raises(HTTPException) as error:
+            check_download_size({"status": "downloading", **sizes}, limit)
+        assert error.value.status_code == 413
 
 
 def test_standardize_signal():
