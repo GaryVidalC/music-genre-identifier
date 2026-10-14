@@ -6,6 +6,7 @@ The supported genres are blues, classical, country, disco, hiphop, jazz, metal, 
 
 Use Docker Compose to start the frontend and API. A model export is included; MLflow and retraining are not required to run predictions.
 
+Service Deployed at: https://music-genre-identifier.gvidal.cl/
 
 ## Project structure
 
