@@ -2,14 +2,8 @@ from pathlib import Path
 
 import librosa
 import numpy as np
-import torch  # noqa: F401
+import torch
 from torch import nn
-
-root = Path(__file__).parent.parent
-ruta_prueba = root / "data" / "jamendo_sample" / "raw_30s_audio-low-00" / "00" / "4400.low.mp3"
-
-sr = 44100
-audio, sr = librosa.load(ruta_prueba, sr=sr, mono = True)
 
 def snippets(
         audio: np.ndarray,
@@ -78,25 +72,26 @@ def calculate_log_mel_spectrogram(
 
 
 def extract_patches(
-    log_mel: np.ndarray,
+    log_mel: torch.Tensor,
     patch_size: int = 16,
-) -> np.ndarray:
-    """Split a 2D log-mel into non-overlapping square patches.
+) -> torch.Tensor:
+    """Split one or several log-mels into non-overlapping square patches.
 
     Args:
-        log_mel: Spectrogram with shape (mel bands, time frames).
+        log_mel: Tensor shaped (bands, frames) or (snippets, bands, frames).
         patch_size: Positive integer giving each patch's height and width.
 
     Returns:
-        Array shaped (patch count, patch_size, patch_size), with the input
-        dtype. Time varies fastest; incomplete borders are discarded.
+        Tensor shaped (patches, patch_size, patch_size), optionally preceded
+        by the snippets axis. Preserves dtype and device; time varies
+        fastest and incomplete borders are discarded.
 
     Raises:
-        ValueError: If the input is not 2D, patch_size is invalid, or no
+        ValueError: If the input is not 2D/3D, patch_size is invalid, or no
             complete patch fits.
     """
-    if log_mel.ndim != 2:
-        raise ValueError("log_mel must be a 2D array.")
+    if log_mel.ndim not in (2, 3):
+        raise ValueError("log_mel must be a 2D or 3D tensor.")
     if (
         isinstance(patch_size, bool)
         or not isinstance(patch_size, (int, np.integer))
@@ -104,43 +99,32 @@ def extract_patches(
     ):
         raise ValueError("patch_size must be a positive integer.")
 
-    n_bands, n_frames = log_mel.shape
+    n_bands, n_frames = log_mel.shape[-2:]
     if n_bands < patch_size or n_frames < patch_size:
         raise ValueError("log_mel must contain at least one complete patch.")
 
-    patches = []
-    for band in range(0, n_bands - patch_size + 1, patch_size):
-        for frame in range(0, n_frames - patch_size + 1, patch_size):
-            patches.append(
-                log_mel[band:band + patch_size, frame:frame + patch_size]
-            )
+    # Unfold appends the window axis, leaving time at dimension -2.
+    patches = log_mel.unfold(-2, patch_size, patch_size)
+    patches = patches.unfold(-2, patch_size, patch_size)
+    return patches.flatten(start_dim=-4, end_dim=-3)
 
-    return np.stack(patches, axis=0)
-
-
-snip = snippets(audio, sr)
-mel = calculate_log_mel_spectrogram(snip[0], sr)
-print(f"log_mel shape: {mel.shape}")
-
-patches = extract_patches(mel, patch_size=16)
-print(f"patches shape: {patches.shape}")
-
-
-patches_reshape = np.reshape(patches, (patches.shape[0], 256))
-print(f"patches_reshape shape: {patches_reshape.shape}")
-
-linear = nn.Linear(in_features=256, out_features=256)
-
-print(f"test linear: {linear(torch.from_numpy(patches_reshape).float()).shape}")
 
 class NN_model(nn.Module):
-    def __init__(self, d_model = 256, patches = 320):
+    def __init__(self,n_genres: int, d_model: int = 256, patches: int = 320) -> None:
+        """Build the snippet encoder with embedding width and patch capacity.
+
+        Args:
+            d_model: Width of each patch and snippet embedding.
+            patches: Maximum number of patch positions in each snippet.
+        """
         super(NN_model, self).__init__()
         self.d_model = d_model
+        self.n_genres = n_genres
 
-        # Linear layer
-        self.linear = nn.Linear(in_features=256, out_features=256)
-
+        # Linear layers
+        self.linear_first = nn.Linear(in_features=256, out_features=d_model)
+        self.linear_last = nn.Linear(in_features=d_model, out_features=n_genres)
+        
         # positional embedding layer
         self.positional_embedding = nn.Embedding(patches, d_model)  # Positional embedding layer
 
@@ -161,33 +145,86 @@ class NN_model(nn.Module):
         )  # Transformer encoder with 2 layers
 
         # pooling layer
-        # linear layer
-        self.linear_pool_1 = nn.Linear(in_features=d_model, out_features=d_model//2)  # Linear layer for pooling
-        self.linear_pool_2 = nn.Linear(in_features=d_model//2, out_features=1)  # Linear layer for pooling
-        
-        
-    def forward(self, x):
-        # embed the patches
-        x = np.reshape(x, (x.shape[0], self.d_model))  # Reshape to (batch_size, d_model)
-        x = self.linear(torch.from_numpy(x).float())  # Apply linear layer
+        self.pooling_layer = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),  # First linear layer for pooling
+            nn.Tanh(),  # Tanh activation
+            nn.Linear(d_model // 2, 1),  # Second linear layer for pooling
+            nn.Softmax(dim=1)  # Softmax normalization across patches
+        )  # Pooling layer to combine patch embeddings into a single snippet embedding
 
-        # Add positional embeddings
-        positions = torch.arange(x.shape[0], device=x.device)# Create position indices
+        # snippet attention pooling
+        self.snippet_scores = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),  # First linear layer for snippet scoring
+            nn.Tanh(),  # Tanh activation
+            nn.Linear(d_model // 2, 1),  # Second linear layer for snippet scoring
+        )  # Snippet scoring layer to weight snippets based on their importance
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode all snippets of one song without combining snippets.
+
+        Args:
+            x: Floating-point patches shaped (snippets, patches, 16, 16),
+                on the same device and with the same dtype as the model.
+
+        Returns:
+            One embedding per snippet, shaped (snippets, d_model).
+        """
+        if x.ndim != 4 or x.shape[-2:] != (16, 16):
+            raise ValueError("x must have shape (snippets, patches, 16, 16).")
+        if (
+            x.shape[0] == 0
+            or not 0 < x.shape[1] <= self.positional_embedding.num_embeddings
+        ):
+            raise ValueError("Provide snippets with a valid number of patches.")
+
+        # Flatten each patch, retaining the snippet and patch axes.
+        x = self.linear_first(x.flatten(start_dim=-2))
+
+        # Reuse the same patch positions independently for every snippet.
+        positions = torch.arange(x.shape[1], device=x.device)
         x = x + self.positional_embedding(positions)
 
         # add encoder layer
         x = self.transformer_encoder(x)
 
         # pooling layer
-        pl = self.linear_pool_1(x)  # Apply first linear pooling layer
-        pl = nn.Tanh()(pl)  # Apply Tanh activation
-        pl = self.linear_pool_2(pl)  # Apply second linear pooling layer
-        pl = nn.Softmax(dim=0)(pl)  # Apply softmax activation
+        pl = self.pooling_layer(x)  # Apply the pooling layer
 
-        # muultiply the pooling layer with the encoder output
+        # Weight and sum patches without reducing the snippet axis.
         x = torch.mul(x, pl)  # Element-wise multiplication of encoder output and pooling
-        x = torch.sum(x, dim=0)  # Sum over the patch dimension
+        x = torch.sum(x, dim=1)  # Sum over the patch dimension
+
+        scores = self.snippet_scores(x)  # Apply the snippet scoring layer
+        weights = torch.softmax(scores, dim=0)  # Softmax normalization across snippets
+        song_embedding = torch.sum(weights * x, dim=0)  # Weighted sum of snippet embeddings
+
+
+        # return final linear layer output
+        x = self.linear_last(song_embedding)  # Final linear layer to get the song
+
         return x
 
-nn_out = NN_model()(patches)
-print(f"test NN_model: {nn_out.shape}")
+if __name__ == "__main__":
+    root = Path(__file__).parent.parent
+    ruta_prueba = (
+        root / "data" / "jamendo_sample" / "raw_30s_audio-low-00"
+        / "00" / "4400.low.mp3"
+    )
+    sr = 44100
+    audio, sr = librosa.load(ruta_prueba, sr=sr, mono=True)
+    snips = snippets(audio, sr)
+    if not snips:
+        raise ValueError("Audio must contain at least one complete snippet.")
+
+    log_mels = torch.stack([
+        torch.from_numpy(calculate_log_mel_spectrogram(snip, sr)).float()
+        for snip in snips
+    ])
+    patches = extract_patches(log_mels, patch_size=16)
+    model = NN_model(n_genres=10).eval()
+    with torch.inference_mode():
+        nn_out = model(patches)
+
+    print(f"log_mel shape: {log_mels.shape}")
+    print(f"patches shape: {patches.shape}")
+    print(f"nn out shape: {nn_out.shape}")
