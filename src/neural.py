@@ -127,6 +127,7 @@ class NN_model(nn.Module):
         
         # positional embedding layer
         self.positional_embedding = nn.Embedding(patches, d_model)  # Positional embedding layer
+        self.positional_snippet_embedding = nn.Embedding(40, d_model)  # Positional embedding layer for snippets
 
         # encoder layer
         self.encoder_layer = nn.TransformerEncoderLayer(
@@ -144,21 +145,46 @@ class NN_model(nn.Module):
             num_layers=2
         )  # Transformer encoder with 2 layers
 
-        # pooling layer
-        self.pooling_layer = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),  # First linear layer for pooling
-            nn.Tanh(),  # Tanh activation
-            nn.Linear(d_model // 2, 1),  # Second linear layer for pooling
-            nn.Softmax(dim=1)  # Softmax normalization across patches
-        )  # Pooling layer to combine patch embeddings into a single snippet embedding
+        # patching multi head attention
+        self.patch_query = nn.Parameter(
+            torch.randn(1, 1, d_model)*0.02
+        )  # Learnable query for patch attention
+        self.patch_cross_attention = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=4,
+            dropout=0.1,
+            batch_first=True
+        )  # Multihead attention for patch-level attention
 
-        # snippet attention pooling
-        self.snippet_scores = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),  # First linear layer for snippet scoring
-            nn.Tanh(),  # Tanh activation
-            nn.Linear(d_model // 2, 1),  # Second linear layer for snippet scoring
-        )  # Snippet scoring layer to weight snippets based on their importance
-        
+        # snippet transformer layer
+        self.snippet_transformer_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, 
+            nhead=4,
+            dropout=0.1,
+            dim_feedforward=1024,
+            activation='gelu',
+            batch_first=True
+        )  # Transformer encoder layer for snippets 
+
+        # snippet transformer encoder
+        self.snippet_transformer_encoder = nn.TransformerEncoder(
+            self.snippet_transformer_layer,
+            num_layers=2
+        )  # Transformer encoder with 2 layers for snippets
+
+        # genres queries 
+        self.genre_queries = nn.Parameter(
+            torch.randn(n_genres, 1, d_model)*0.02
+        )  # Learnable queries for genre classification
+        # snippet cross attention for genre classification
+        self.snippet_cross_attention = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=4,
+            dropout=0.1,
+            batch_first=False
+        )  # Multihead attention for snippet-level attention
+
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Encode all snippets of one song without combining snippets.
 
@@ -187,21 +213,33 @@ class NN_model(nn.Module):
         # add encoder layer
         x = self.transformer_encoder(x)
 
-        # pooling layer
-        pl = self.pooling_layer(x)  # Apply the pooling layer
+        query = self.patch_query.expand(x.shape[0], -1, -1)  # Expand the query for each snippet
+        x,_ = self.patch_cross_attention(
+            query = query, 
+            key = x, 
+            value = x,
+            need_weights = False
+        )  # Apply multihead attention for patch-level attentionahi
+        x = x.squeeze(1)  # Remove the singleton dimension after attention
 
-        # Weight and sum patches without reducing the snippet axis.
-        x = torch.mul(x, pl)  # Element-wise multiplication of encoder output and pooling
-        x = torch.sum(x, dim=1)  # Sum over the patch dimension
+        # add positional embedding for snippets
+        x = x + self.positional_snippet_embedding(torch.arange(x.shape[0], device=x.device))
 
-        scores = self.snippet_scores(x)  # Apply the snippet scoring layer
-        weights = torch.softmax(scores, dim=0)  # Softmax normalization across snippets
-        song_embedding = torch.sum(weights * x, dim=0)  # Weighted sum of snippet embeddings
-
+        # add snippet transformer layer
+        x = self.snippet_transformer_encoder(x)
+        x = x.unsqueeze(1)  # Add a singleton dimension for the snippet axis
+        # attention for snippets
+        query = self.genre_queries
+        song_embedding,_ = self.snippet_cross_attention(
+            query = query, 
+            key = x, 
+            value = x,
+            need_weights = False
+        )  # Apply multihead attention for snippet-level attention
+        song_embedding = song_embedding.squeeze(1)  # Remove the singleton dimension after attention
 
         # return final linear layer output
-        x = self.linear_last(song_embedding)  # Final linear layer to get the song
-
+        x = (song_embedding * self.linear_last.weight).sum(dim=-1) + self.linear_last.bias  # Final linear layer for genre classification
         return x
 
 if __name__ == "__main__":
