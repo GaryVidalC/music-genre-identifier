@@ -4,3 +4,4 @@ joblib==1.5.3
 pandas==3.0.0
 pyarrow==23.0.1
 optuna
+torch==2.14.1
