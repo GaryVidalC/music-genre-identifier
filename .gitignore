@@ -58,3 +58,7 @@ mlruns/
 # deploys
 DEPLOY_GC.md
 DEPLOY_HOMESERVER.md
+
+
+#todo
+TODO_CNN_TRANSFORMER.md

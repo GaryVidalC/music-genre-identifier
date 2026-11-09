@@ -155,16 +155,26 @@ def validation_metrics(labels: torch.Tensor, scores: torch.Tensor) -> dict:
     }
 
 
+def format_duration(seconds: float) -> str:
+    """Return an elapsed or estimated duration as hours:minutes:seconds."""
+    minutes, seconds = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
 def run_epoch(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
     optimizer: torch.optim.Optimizer | None = None,
+    description: str | None = None,
 ) -> dict:
     """Train or validate one loader; return song-weighted BCE and metrics.
 
     Passing an optimizer enables training; otherwise use inference mode and
     collect validation probabilities on CPU, without retaining GPU graphs.
+    description labels terminal progress, printed at the first, last and
+    every 50th batch. ETA includes audio loading and preprocessing time.
     """
     training = optimizer is not None
     model.train(training)
@@ -172,9 +182,13 @@ def run_epoch(
     total_loss = 0.0
     song_count = 0
     targets, scores = [], []
+    description = description or ("Train" if training else "Validation")
+    total_batches = len(loader)
+    started = time.perf_counter()
+    print(f"{description} | Starting {total_batches} batches...", flush=True)
     context = torch.enable_grad() if training else torch.inference_mode()
     with context:
-        for patches, labels, padding_mask in loader:
+        for batch, (patches, labels, padding_mask) in enumerate(loader, 1):
             patches = patches.to(device=device, dtype=torch.float32)
             labels = labels.to(device=device, dtype=torch.float32)
             padding_mask = padding_mask.to(device)
@@ -198,6 +212,16 @@ def run_epoch(
                 scores.append(logits.sigmoid().cpu())
             total_loss += loss.item() * labels.shape[0]
             song_count += labels.shape[0]
+            if batch == 1 or batch % 50 == 0 or batch == total_batches:
+                elapsed = time.perf_counter() - started
+                remaining = elapsed / batch * (total_batches - batch)
+                print(
+                    f"{description} | Batch {batch}/{total_batches} "
+                    f"({batch / total_batches:.1%}) | "
+                    f"BCE {total_loss / song_count:.4f} | "
+                    f"Elapsed {format_duration(elapsed)} | "
+                    f"ETA {format_duration(remaining)}", flush=True,
+                )
     if not song_count:
         raise ValueError("Cannot run an epoch on an empty loader.")
     if training:
@@ -336,8 +360,14 @@ def train(args: argparse.Namespace) -> Path:
             # First epoch includes the initial model allocation in its peaks.
             if device.type == "cuda" and epoch != start_epoch + 1:
                 torch.cuda.reset_peak_memory_stats(device)
-            metrics = run_epoch(model, train_loader, device, optimizer)
-            metrics.update(run_epoch(model, val_loader, device))
+            metrics = run_epoch(
+                model, train_loader, device, optimizer,
+                description=f"Train {epoch}/{args.epochs}",
+            )
+            metrics.update(run_epoch(
+                model, val_loader, device,
+                description=f"Validation {epoch}/{args.epochs}",
+            ))
             metrics["epoch_seconds"] = time.perf_counter() - started
             if device.type == "cuda":
                 metrics["peak_allocated_bytes"] = (
