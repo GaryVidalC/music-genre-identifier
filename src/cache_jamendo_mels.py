@@ -126,14 +126,37 @@ def manifest_records(subset: Path, annotations_dir: Path) -> list[dict]:
     return result
 
 
+def extend_index(
+    cache: MelCache, records: list[dict], fingerprint: str,
+) -> None:
+    """Validate additive coverage, back up the index and switch manifest."""
+    incoming = {record["track_id"]: record for record in records}
+    if set(cache.index["entries"]) - incoming.keys():
+        raise ValueError("Extension cannot remove existing cached tracks.")
+    for track_id in cache.index["entries"]:
+        cache.open(incoming[track_id], full_check=True)
+    old_fingerprint = cache.index["subset_sha256"]
+    backup = cache.directory / f"index.before-{old_fingerprint}.json"
+    if backup.exists():
+        if json.loads(backup.read_text()) != cache.index:
+            raise ValueError("Existing index backup differs; not overwritten.")
+    else:
+        write_json(backup, cache.index)
+    cache.index.setdefault("subset_history", []).append(old_fingerprint)
+    cache.index.update(subset_sha256=fingerprint, complete=False)
+    write_json(cache.directory / "index.json", cache.index)
+
+
 def build_cache(
     subset: Path, output_dir: Path, audio_dir: Path, annotations_dir: Path,
+    extend: bool = False,
 ) -> dict:
     """Generate one complete power mel per song, resume and verify all files.
 
     Preserve audio, labels and completed compatible cache files. Fail with
     the offending track on corruption or source changes; no silent fallback.
     A file written before an interrupted index update can be regenerated.
+    extend permits an additive manifest, preserving a backup of the old index.
     """
     records = manifest_records(subset, annotations_dir)
     fingerprint = hashlib.sha256(subset.read_bytes()).hexdigest()
@@ -141,13 +164,15 @@ def build_cache(
     index_path = output_dir / "index.json"
     if index_path.exists():
         cache = MelCache(output_dir, audio_dir)
-        if cache.index["subset_sha256"] != fingerprint:
-            raise ValueError("Cache belongs to another subset manifest.")
         if (
             cache.index["librosa_version"] != librosa.__version__
             or cache.index["numpy_version"] != str(np.__version__)
         ):
             raise ValueError("Cannot resume with different library versions.")
+        if cache.index["subset_sha256"] != fingerprint:
+            if not extend:
+                raise ValueError("Cache belongs to another subset manifest.")
+            extend_index(cache, records, fingerprint)
     else:
         if any(output_dir.iterdir()):
             raise FileExistsError(
@@ -229,6 +254,10 @@ def main() -> None:
     root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--subset", type=Path, required=True)
+    parser.add_argument(
+        "--extend", action="store_true",
+        help="Extend a cache, preserving files and backing up its index.",
+    )
     parser.add_argument("--output-dir", type=Path,
                         default=root / "data/jamendo/mel_cache")
     parser.add_argument("--audio-dir", type=Path,
@@ -238,6 +267,7 @@ def main() -> None:
     args = parser.parse_args()
     build_cache(
         args.subset, args.output_dir, args.audio_dir, args.annotations_dir,
+        extend=args.extend,
     )
 
 

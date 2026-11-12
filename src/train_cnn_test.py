@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -125,6 +126,7 @@ def train(
     subset: Path | None = None,
     patience: int = 10, tracking_uri: str | None = None,
     mel_cache_dir: Path | None = None,
+    learning_rate: float = 1e-4,
 ) -> Path:
     """Open mandatory MLflow tracking, then run a fixed CNN experiment.
 
@@ -132,11 +134,14 @@ def train(
     then localhost. Validation stops after patience epochs without mAP
     improvement; memorization always uses the requested epoch count.
     mel_cache_dir enables precomputed power mels, checked before GPU loading.
+    learning_rate sets AdamW's rate and is recorded in configuration/MLflow.
     """
     if epochs <= 0 or batch_size <= 0 or patience <= 0:
         raise ValueError("epochs, batch_size and patience must be positive.")
     if train_songs <= 0 or val_songs < 0:
         raise ValueError("train_songs must be positive; val_songs >= 0.")
+    if not math.isfinite(learning_rate) or learning_rate <= 0:
+        raise ValueError("learning_rate must be finite and positive.")
     tracking_uri = (
         tracking_uri or os.getenv("MLFLOW_TRACKING_URI")
         or "http://localhost:5000"
@@ -148,6 +153,7 @@ def train(
             epochs, batch_size, train_songs, val_songs, subset, patience,
             tracking_uri, run.info.run_id,
             mel_cache_dir,
+            learning_rate=learning_rate,
         )
 
 
@@ -155,6 +161,7 @@ def _train_run(
     epochs: int, batch_size: int, train_songs: int, val_songs: int,
     subset: Path | None, patience: int, tracking_uri: str, run_id: str,
     mel_cache_dir: Path | None = None,
+    learning_rate: float = 1e-4,
 ) -> Path:
     """Run inside an open tracking context and return the local directory.
 
@@ -164,6 +171,7 @@ def _train_run(
     subset overrides song counts with a verified frozen train/val manifest.
     Save last.pt each completed epoch and best.pt on strict mAP improvement
     after baseline epoch 0. No previous run or partial epoch is resumed.
+    learning_rate is shared by the recorded configuration and AdamW.
     """
     torch.manual_seed(42)
     torch.set_num_threads(4)
@@ -217,7 +225,7 @@ def _train_run(
         ),
         "max_audio_duration_seconds": MAX_LOG_MEL_DURATION,
         "train_crop": "random", "evaluation_crop": "central",
-        "learning_rate": 1e-4, "weight_decay": 0.01,
+        "learning_rate": learning_rate, "weight_decay": 0.01,
         "optimizer": "AdamW", "loss": "BCEWithLogitsLoss",
         "precision": "float32", "conv_channels": 32, "temporal_pool": 8,
         "d_model": 256, "layers": 4, "heads": 8, "feedforward": 1024,
@@ -280,7 +288,7 @@ def _train_run(
     model = MGI().to(device)
     mlflow.log_param("parameters", sum(p.numel() for p in model.parameters()))
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=1e-4, weight_decay=0.01,
+        model.parameters(), lr=learning_rate, weight_decay=0.01,
     )
     history = []
     summary = {
@@ -389,6 +397,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--tracking-uri")
     parser.add_argument("--mel-cache-dir", type=Path)
     parser.add_argument("--train-songs", type=int)
@@ -407,6 +416,8 @@ def main() -> None:
         parser.error("--batch-size must be positive.")
     if args.patience <= 0:
         parser.error("--patience must be positive.")
+    if not math.isfinite(args.learning_rate) or args.learning_rate <= 0:
+        parser.error("--learning-rate must be finite and positive.")
     if args.subset is not None and (
         args.train_songs is not None or args.val_songs is not None
     ):
@@ -420,6 +431,7 @@ def main() -> None:
         train_songs=train_songs, val_songs=val_songs, subset=args.subset,
         patience=args.patience, tracking_uri=args.tracking_uri,
         mel_cache_dir=args.mel_cache_dir,
+        learning_rate=args.learning_rate,
     )
 
 

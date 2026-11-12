@@ -231,23 +231,68 @@ def test_tracking_uri_precedence(
 
 
 def test_cli(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pass new flags through and reject nonpositive patience."""
+    """Pass flags through, preserve the default rate and validate patience."""
     work = Mock()
     monkeypatch.setattr(trainer, "train", work)
+    monkeypatch.setattr("sys.argv", ["train_cnn_test"])
+    trainer.main()
+    assert work.call_args.kwargs["learning_rate"] == 1e-4
+    work.reset_mock()
     monkeypatch.setattr("sys.argv", [
         "train_cnn_test", "--patience", "3", "--tracking-uri", "http://local",
         "--mel-cache-dir", "cache",
+        "--learning-rate", "3e-5",
     ])
     trainer.main()
     assert work.call_args.kwargs["patience"] == 3
     assert work.call_args.kwargs["tracking_uri"] == "http://local"
     assert work.call_args.kwargs["mel_cache_dir"] == Path("cache")
+    assert work.call_args.kwargs["learning_rate"] == 3e-5
     work.reset_mock()
     monkeypatch.setattr("sys.argv", ["train_cnn_test", "--patience", "0"])
     with pytest.raises(SystemExit) as error:
         trainer.main()
     assert error.value.code == 2
     work.assert_not_called()
+
+
+@pytest.mark.parametrize("rate", [None, 3e-5])
+def test_learning_rate_recorded_and_used(
+    monkeypatch: pytest.MonkeyPatch, harness: SimpleNamespace,
+    rate: float | None,
+) -> None:
+    """Use the same default/custom rate in AdamW, tracking and checkpoints."""
+    simulate(monkeypatch, harness, [0.1, 0.2])
+    options = {} if rate is None else {"learning_rate": rate}
+    expected = 1e-4 if rate is None else rate
+    output = trainer.train(1, train_songs=17, val_songs=2, **options)
+    assert torch.optim.AdamW.call_args.kwargs["lr"] == expected
+    assert harness.tracking.log_params.call_args.args[0][
+        "learning_rate"
+    ] == expected
+    config = json.loads((output / "config.json").read_text())
+    assert config["learning_rate"] == expected
+    checkpoint = torch.load(output / "last.pt", weights_only=True)
+    assert checkpoint["config"]["learning_rate"] == expected
+
+
+@pytest.mark.parametrize("rate", [0.0, -1.0, float("nan"), float("inf"),
+                                  float("-inf")])
+def test_invalid_learning_rate(
+    monkeypatch: pytest.MonkeyPatch, harness: SimpleNamespace, rate: float,
+) -> None:
+    """Reject invalid rates before tracking, audio or GPU allocation."""
+    with pytest.raises(ValueError, match="finite and positive"):
+        trainer.train(1, learning_rate=rate)
+    monkeypatch.setattr("sys.argv", [
+        "train_cnn_test", f"--learning-rate={rate}",
+    ])
+    with pytest.raises(SystemExit) as error:
+        trainer.main()
+    assert error.value.code == 2
+    harness.tracking.set_tracking_uri.assert_not_called()
+    harness.constructor.assert_not_called()
+    torch.cuda.is_available.assert_not_called()
 
 
 def test_cache_failure_prevents_gpu_model(

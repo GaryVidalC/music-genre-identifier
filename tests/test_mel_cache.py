@@ -206,3 +206,64 @@ def test_raw_mode_and_loader(files: SimpleNamespace) -> None:
             "train", files.annotations, files.audio,
             mel_cache_dir=files.cache,
         )
+
+
+def expanded_fixture(files: SimpleNamespace, remove_old: bool = False) -> Path:
+    """Add one official validation song and write a separate subset."""
+    sf.write(files.audio / "song2.wav", np.zeros(44100), 44100)
+    record = {"track_id": "2", "path": "song2.wav", "labels": [0, 0, 1]}
+    validation = files.records[1:] + [record]
+    (files.annotations / "validation.json").write_text(json.dumps(validation))
+    manifest = json.loads(files.manifest.read_text())
+    manifest["evaluation_records"] = (
+        [record] if remove_old else validation
+    )
+    path = files.manifest.with_name("expanded.json")
+    path.write_text(json.dumps(manifest))
+    return path
+
+
+def test_additive_extension_and_resume(
+    files: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve old files/readers and resume an interrupted additive build."""
+    old_index = build(files)
+    stamps = {p.name: p.stat().st_mtime_ns
+              for p in files.cache.glob("*.npy")}
+    expanded = expanded_fixture(files)
+    args = (expanded, files.cache, files.audio, files.annotations)
+    with pytest.raises(ValueError, match="another subset"):
+        cache_module.build_cache(*args)
+    save = np.save
+    load = Mock(wraps=librosa.load)
+    monkeypatch.setattr(librosa, "load", load)
+    monkeypatch.setattr(np, "save", Mock(side_effect=RuntimeError("stop")))
+    with pytest.raises(RuntimeError, match="2: cache generation failed"):
+        cache_module.build_cache(*args, extend=True)
+    monkeypatch.setattr(np, "save", save)
+    index = cache_module.build_cache(*args)
+    assert index["complete"] and index["tracks"] == 3
+    assert index["subset_history"] == [old_index["subset_sha256"]]
+    backup = next(files.cache.glob("index.before-*.json"))
+    assert json.loads(backup.read_text()) == old_index
+    assert stamps == {name: (files.cache / name).stat().st_mtime_ns
+                      for name in stamps}
+    assert [Path(call.args[0]).name for call in load.call_args_list] == [
+        "song2.wav", "song2.wav",
+    ]
+    cache_module.MelCache(files.cache, files.audio).open(files.records[0])
+    monkeypatch.setattr(librosa, "load", Mock(side_effect=AssertionError()))
+    assert cache_module.build_cache(*args)["complete"]
+
+
+def test_extension_cannot_remove_tracks(files: SimpleNamespace) -> None:
+    """Reject non-additive manifests without changing the existing index."""
+    build(files)
+    previous = (files.cache / "index.json").read_bytes()
+    expanded = expanded_fixture(files, remove_old=True)
+    with pytest.raises(ValueError, match="cannot remove"):
+        cache_module.build_cache(
+            expanded, files.cache, files.audio, files.annotations, extend=True,
+        )
+    assert (files.cache / "index.json").read_bytes() == previous
+    assert not list(files.cache.glob("index.before-*.json"))
